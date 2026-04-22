@@ -1,0 +1,41 @@
+services:
+  # 🗄️ PostgreSQL - Banco de Dados Principal
+  postgres:
+    image: postgres:15-alpine
+    container_name: havoc_postgres
+    restart: always
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: docker
+      POSTGRES_PASSWORD: docker
+      POSTGRES_DB: havoc_db
+    volumes:
+      - havoc_pg_data:/var/lib/postgresql/data
+    networks:
+      - havoc_network
+
+  # 📦 Redis - Cache e Fila (BullMQ)
+  redis:
+    image: redis:7-alpine
+    container_name: havoc_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - havoc_redis_data:/data
+    networks:
+      - havoc_network
+
+# 💾 Volumes para persistência de dados
+volumes:
+  havoc_pg_data:
+    driver: local
+  havoc_redis_data:
+    driver: local
+
+# 🌐 Rede interna do Docker
+networks:
+  havoc_network:
+    driver: bridge
