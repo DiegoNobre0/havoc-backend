@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",           // Atualizado
+    "moduleResolution": "NodeNext", // Atualizado
+    "rootDir": "./",
+    "outDir": "./dist",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "exactOptionalPropertyTypes": true, // A causa do 3º erro
+    "skipLibCheck": true
+  },
+  "include": ["src", "prisma.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,0 +1,361 @@
+// ============================================================
+// HAVOC SUPLEMENTOS — schema.prisma
+// Single Tenant | PostgreSQL
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum Role {
+  ADMIN
+  OPERADOR
+  VISUALIZADOR
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  PIX
+  PAYMENT_LINK
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  EXPIRED
+  FAILED
+  REFUNDED
+}
+
+enum ChatMessageRole {
+  USER
+  ASSISTANT
+}
+
+enum ShippingType {
+  BY_CEP
+  BY_REGION
+  BY_WEIGHT
+}
+
+// ============================================================
+// USUÁRIOS & AUTH
+// ============================================================
+
+model User {
+  id           String    @id @default(uuid())
+  name         String
+  email        String    @unique
+  password     String
+  role         Role      @default(OPERADOR)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  orders       Order[]
+  chatSessions ChatSession[]
+  auditLogs    AuditLog[]
+
+  @@index([email])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+// ============================================================
+// CATÁLOGO
+// ============================================================
+
+model Category {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  slug        String    @unique
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  products    Product[]
+
+  @@index([slug])
+  @@index([deletedAt])
+  @@map("categories")
+}
+
+model Product {
+  id           String    @id @default(uuid())
+  name         String
+  slug         String    @unique
+  description  String?
+  price        Decimal   @db.Decimal(10, 2)
+  stock        Int       @default(0)
+  sku          String?   @unique
+  imageUrl     String?
+  imageKey     String?   // S3 key para deleção
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  categoryId   String
+  category     Category  @relation(fields: [categoryId], references: [id])
+
+  kitItems     KitItem[]
+  orderItems   OrderItem[]
+
+  @@index([slug])
+  @@index([categoryId])
+  @@index([deletedAt])
+  @@index([isActive])
+  @@map("products")
+}
+
+model Kit {
+  id             String    @id @default(uuid())
+  name           String
+  slug           String    @unique
+  description    String?
+  imageUrl       String?
+  imageKey       String?
+  discountType   String    @default("PERCENTAGE") // PERCENTAGE | FIXED
+  discountValue  Decimal   @db.Decimal(10, 2)
+  finalPrice     Decimal   @db.Decimal(10, 2)
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  items          KitItem[]
+  orderItems     OrderItem[]
+
+  @@index([slug])
+  @@index([deletedAt])
+  @@map("kits")
+}
+
+model KitItem {
+  id         String   @id @default(uuid())
+  quantity   Int      @default(1)
+  createdAt  DateTime @default(now())
+
+  kitId      String
+  kit        Kit      @relation(fields: [kitId], references: [id], onDelete: Cascade)
+
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+
+  @@unique([kitId, productId])
+  @@map("kit_items")
+}
+
+// ============================================================
+// PEDIDOS
+// ============================================================
+
+model Order {
+  id              String      @id @default(uuid())
+  code            String      @unique // ex: HAV-00001
+  status          OrderStatus @default(PENDING)
+  subtotal        Decimal     @db.Decimal(10, 2)
+  shippingCost    Decimal     @db.Decimal(10, 2) @default(0)
+  discount        Decimal     @db.Decimal(10, 2) @default(0)
+  total           Decimal     @db.Decimal(10, 2)
+  notes           String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  deletedAt       DateTime?
+
+  userId          String
+  user            User        @relation(fields: [userId], references: [id])
+
+  shippingRuleId  String?
+  shippingRule    ShippingRule? @relation(fields: [shippingRuleId], references: [id])
+
+  items           OrderItem[]
+  payment         Payment?
+  statusHistory   OrderStatusHistory[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([code])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id          String   @id @default(uuid())
+  quantity    Int
+  unitPrice   Decimal  @db.Decimal(10, 2)
+  totalPrice  Decimal  @db.Decimal(10, 2)
+  createdAt   DateTime @default(now())
+
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId   String?
+  product     Product? @relation(fields: [productId], references: [id])
+
+  kitId       String?
+  kit         Kit?     @relation(fields: [kitId], references: [id])
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model OrderStatusHistory {
+  id        String      @id @default(uuid())
+  status    OrderStatus
+  note      String?
+  createdAt DateTime    @default(now())
+
+  orderId   String
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_status_history")
+}
+
+// ============================================================
+// PAGAMENTOS (Banco Digital)
+// ============================================================
+
+model Payment {
+  id              String        @id @default(uuid())
+  method          PaymentMethod
+  status          PaymentStatus @default(PENDING)
+  amount          Decimal       @db.Decimal(10, 2)
+  pixCode         String?       @db.Text  // copia-e-cola
+  pixQrCodeUrl    String?                 // URL da imagem do QR Code
+  paymentLink     String?
+  externalId      String?       @unique   // ID retornado pelo banco digital
+  webhookPayload  Json?                   // payload cru do webhook
+  paidAt          DateTime?
+  expiresAt       DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  orderId         String        @unique
+  order           Order         @relation(fields: [orderId], references: [id])
+
+  @@index([status])
+  @@index([externalId])
+  @@index([createdAt])
+  @@map("payments")
+}
+
+// ============================================================
+// CHATBOT
+// ============================================================
+
+model ChatSession {
+  id          String        @id @default(uuid())
+  sessionKey  String        @unique @default(uuid())
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  userId      String?
+  user        User?         @relation(fields: [userId], references: [id])
+
+  messages    ChatMessage[]
+
+  @@index([sessionKey])
+  @@index([userId])
+  @@map("chat_sessions")
+}
+
+model ChatMessage {
+  id          String          @id @default(uuid())
+  role        ChatMessageRole
+  content     String          @db.Text
+  tokens      Int?            // tokens consumidos (controle de custo)
+  createdAt   DateTime        @default(now())
+
+  sessionId   String
+  session     ChatSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([createdAt])
+  @@map("chat_messages")
+}
+
+model ChatbotConfig {
+  id              String   @id @default(uuid())
+  systemPrompt    String   @db.Text
+  temperature     Float    @default(0.7)
+  maxTokens       Int      @default(500)
+  fallbackMessage String   @db.Text
+  isActive        Boolean  @default(true)
+  updatedAt       DateTime @updatedAt
+
+  @@map("chatbot_config")
+}
+
+// ============================================================
+// FRETE
+// ============================================================
+
+model ShippingRule {
+  id          String       @id @default(uuid())
+  name        String
+  type        ShippingType
+  cep         String?      // CEP exato ou prefixo
+  region      String?      // ex: "SP", "Sul", "Nordeste"
+  minWeight   Float?       // kg
+  maxWeight   Float?       // kg
+  price       Decimal      @db.Decimal(10, 2)
+  estimatedDays Int        @default(7)
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  orders      Order[]
+
+  @@index([type])
+  @@index([isActive])
+  @@map("shipping_rules")
+}
+
+// ============================================================
+// AUDITORIA
+// ============================================================
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  action     String   // ex: "USER_LOGIN", "PRODUCT_CREATED", "PAYMENT_CONFIRMED"
+  entity     String?  // ex: "Product", "Order"
+  entityId   String?
+  payload    Json?    // dados relevantes da ação
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
