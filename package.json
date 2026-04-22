@@ -9,7 +9,8 @@
     "start": "node dist/server.js",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write src/**/*.ts",
-    "prepare": "husky"
+    "prepare": "husky",
+    "precommit": "lint-staged" 
   },
   "keywords": [],
   "author": "",
