@@ -1,21 +1,11 @@
-import { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
-import { ZodError } from 'zod';
+import { FastifyError, FastifyReply, FastifyRequest } from 'fastify'; // Importamos o FastifyError
 import { AppError } from '../errors/AppError.js';
-import { logger } from '../logger.js';
-
 
 export function errorHandler(
-  error: FastifyError,
+  error: FastifyError | AppError | Error, // Tipamos explicitamente os tipos de erro possíveis
   request: FastifyRequest,
   reply: FastifyReply
 ) {
-  if (error instanceof ZodError) {
-    return reply.status(400).send({
-      message: 'Erro de validação dos dados.',
-      issues: error.format(),
-    });
-  }
-
   if (error instanceof AppError) {
     return reply.status(error.statusCode).send({
       status: 'error',
@@ -23,11 +13,18 @@ export function errorHandler(
     });
   }
 
-  // Log do erro interno que não foi tratado pela aplicação
-  logger.error(error);
+  // Se o erro vier da própria validação do Zod (Fastify/Zod integration) ou outros plugins
+  if ('statusCode' in error && error.statusCode) {
+      return reply.status(error.statusCode).send({
+          status: 'error',
+          message: error.message,
+      })
+  }
+
+  console.error(error);
 
   return reply.status(500).send({
     status: 'error',
-    message: 'Erro interno do servidor.',
+    message: 'Internal server error',
   });
 }

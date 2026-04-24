@@ -6,8 +6,8 @@ import { logger } from './shared/logger.js';
 async function bootstrap() {
   try {
     await app.listen({ port: env.PORT, host: '0.0.0.0' });
-    logger.info(`🚀 Servidor rodando na porta ${env.PORT}`);
-    logger.info(`📚 Documentação disponível em http://localhost:${env.PORT}/docs`);
+    logger.info(`Servidor rodando na porta ${env.PORT}`);
+    logger.info(`Documentacao disponivel em http://localhost:${env.PORT}/docs`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

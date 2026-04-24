@@ -5,19 +5,31 @@ import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 
-import errorMiddleware = require('./shared/middlewares/error.middleware');
+import { serializerCompiler, validatorCompiler, jsonSchemaTransform } from 'fastify-type-provider-zod';
+import { errorHandler } from './shared/middlewares/error.middleware.js';
 import { logger } from './shared/logger.js';
+import jwt from '@fastify/jwt';
+import { env } from './env/index.js';
+import { authRoutes } from './modules/auth/auth.routes.js';
+import { usersRoutes } from './modules/users/users.routes.js';
 
 export const app = fastify({
-  logger: logger,
+  loggerInstance: logger, 
 });
 
-app.setErrorHandler(errorMiddleware.errorHandler);
+app.setValidatorCompiler(validatorCompiler);
+app.setSerializerCompiler(serializerCompiler);
+
+app.setErrorHandler(errorHandler);
 
 // Segurança base
 app.register(helmet);
 app.register(cors, {
   origin: true, // Em produção, colocar a URL do frontend Angular
+  credentials: true,
+});
+app.register(jwt, {
+  secret: env.JWT_SECRET,
 });
 
 // Proteção contra DDoS básico
@@ -28,17 +40,25 @@ app.register(rateLimit, {
 
 // Configuração do Swagger / OpenAPI
 app.register(swagger, {
-  swagger: {
+  openapi: {
     info: {
       title: 'Havoc Suplementos API',
       description: 'Documentação completa da API do backend.',
       version: '1.0.0',
     },
-    consumes: ['application/json'],
-    produces: ['application/json'],
+    // Adicione este bloco:
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
+    },
   },
+  transform: jsonSchemaTransform,
 });
-
 app.register(swaggerUi, {
   routePrefix: '/docs',
 });
@@ -47,3 +67,6 @@ app.register(swaggerUi, {
 app.get('/health', async () => {
   return { status: 'ok', timestamp: new Date() };
 });
+
+app.register(usersRoutes, { prefix: '/users' });
+app.register(authRoutes, { prefix: '/auth' });
