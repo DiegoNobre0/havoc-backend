@@ -4,6 +4,7 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
+import multipart from '@fastify/multipart';
 
 import { serializerCompiler, validatorCompiler, jsonSchemaTransform } from 'fastify-type-provider-zod';
 import { errorHandler } from './shared/middlewares/error.middleware.js';
@@ -12,6 +13,8 @@ import jwt from '@fastify/jwt';
 import { env } from './env/index.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { usersRoutes } from './modules/users/users.routes.js';
+import { dashboardRoutes } from './modules/dashboard/dashboard.routes.js';
+import { catalogRoutes } from './modules/catalog/catalog.routes.js';
 
 export const app = fastify({
   loggerInstance: logger, 
@@ -63,6 +66,8 @@ app.register(swaggerUi, {
   routePrefix: '/docs',
 });
 
+app.register(multipart);
+
 // Rota de Healthcheck
 app.get('/health', async () => {
   return { status: 'ok', timestamp: new Date() };
@@ -70,3 +75,5 @@ app.get('/health', async () => {
 
 app.register(usersRoutes, { prefix: '/users' });
 app.register(authRoutes, { prefix: '/auth' });
+app.register(dashboardRoutes, { prefix: '/dashboard' });
+app.register(catalogRoutes, { prefix: '/catalog' });

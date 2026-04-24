@@ -1,30 +1,16 @@
-import { z } from 'zod'
+import { z } from 'zod';
 
-export const salesReportQuerySchema = z.object({
-  startDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato esperado: YYYY-MM-DD'),
-  endDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato esperado: YYYY-MM-DD'),
-  categoryId: z.string().uuid().optional(),
-})
+// Validação para os filtros de data (padrão: últimos 30 dias se não enviar nada)
+export const dashboardQuerySchema = z.object({
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
+});
 
-export const topProductsQuerySchema = z.object({
-  startDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato esperado: YYYY-MM-DD')
-    .optional(),
-  endDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato esperado: YYYY-MM-DD')
-    .optional(),
-  limit: z
-    .string()
-    .optional()
-    .transform(val => (val ? parseInt(val, 10) : 10))
-    .pipe(z.number().min(1).max(50)),
-})
+export const paginationQuerySchema = z.object({
+  page: z.coerce.number().min(1).default(1),
+  limit: z.coerce.number().min(1).max(10000).default(10),
+  status: z.enum(['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REFUNDED']).optional(),
+});
 
-export type SalesReportQuery = z.infer<typeof salesReportQuerySchema>
-export type TopProductsQuery = z.infer<typeof topProductsQuerySchema>
+export type DashboardQuery = z.infer<typeof dashboardQuerySchema>;
+export type PaginationQuery = z.infer<typeof paginationQuerySchema>;

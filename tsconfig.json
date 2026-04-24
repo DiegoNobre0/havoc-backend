@@ -11,6 +11,6 @@
     "exactOptionalPropertyTypes": true, // A causa do 3º erro
     "skipLibCheck": true
   },
-  "include": ["src", "prisma.config.ts"],
+  "include": ["src", "prisma.config.ts", "prisma/seed.ts"],
   "exclude": ["node_modules", "dist"]
 }

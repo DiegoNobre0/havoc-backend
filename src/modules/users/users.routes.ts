@@ -6,8 +6,9 @@ import { verifyJwt } from '../../shared/middlewares/verify-jwt.js';
 
 const usersController = new UsersController();
 
-export async function usersRoutes(app: FastifyInstance) {
-  // Conecta o TypeProvider na rota
+export async function usersRoutes(app: FastifyInstance) { 
+  app.addHook('onRequest', verifyJwt);
+
   app.withTypeProvider<ZodTypeProvider>().post('/', {
     schema: {
       tags: ['Usuários'],
