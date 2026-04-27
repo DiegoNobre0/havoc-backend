@@ -117,14 +117,14 @@ model Product {
   updatedAt    DateTime  @updatedAt
   deletedAt    DateTime?
 
-  categoryId   String
-  category     Category  @relation(fields: [categoryId], references: [id])
+
+  categories  Category[]
 
   kitItems     KitItem[]
   orderItems   OrderItem[]
 
   @@index([slug])
-  @@index([categoryId])
+
   @@index([deletedAt])
   @@index([isActive])
   @@map("products")

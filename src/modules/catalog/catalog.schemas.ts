@@ -23,7 +23,8 @@ export const productQuerySchema = z.object({
   page: z.coerce.number().min(1).default(1),
   limit: z.coerce.number().min(1).max(100).default(12),
   search: z.string().optional(),
-  categoryId: z.string().uuid().optional()
+  categoryIds: z.array(z.string().uuid()).optional()
+
 });
 
 export const createProductSchema = z.object({
@@ -32,7 +33,7 @@ export const createProductSchema = z.object({
   description: z.string().optional(),
   price: z.number().positive("O preço deve ser maior que zero"),
   stock: z.number().int().min(0),
-  categoryId: z.string().uuid()
+  categoryIds: z.array(z.string().uuid())
 });
 
 export const updateProductSchema = createProductSchema.partial();

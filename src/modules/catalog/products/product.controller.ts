@@ -1,14 +1,12 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { ProductService } from './product.service.js';
 
-import { PutObjectCommand } from '@aws-sdk/client-s3';
-import sharp from 'sharp';
-import crypto from 'crypto';
-import { r2Client } from '../../../shared/lib/bucketR2.js';
+import { StorageService } from '../../../shared/services/storage.service.js';
 
 
 export class ProductController {
   private service = new ProductService();
+  private storage = new StorageService();
 
   async list(request: FastifyRequest<{ Querystring: any }>, reply: FastifyReply) {
     const { page, limit, search, categoryId } : any= request.query;
@@ -32,60 +30,28 @@ export class ProductController {
   }
 
   async uploadImage(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
-    const data = await request.file();
-    
-    if (!data) {
-      return reply.status(400).send({ error: 'Nenhuma imagem enviada' });
-    }
-
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
-    if (!allowedTypes.includes(data.mimetype)) {
-      return reply.status(400).send({ error: 'Formato inválido. Envie JPG, PNG ou WEBP.' });
-    }
+    const file = await request.file();
+    if (!file) return reply.status(400).send({ error: 'Arquivo ausente' });
 
     try {
-      // 1. Transforma o arquivo (Stream) num Buffer para o Sharp conseguir processar
-      const imageBuffer = await data.toBuffer();
+      // Faz o upload usando o serviço universal na pasta 'products'
+      const { url, key } = await this.storage.uploadFile('products', file);
 
-      // 2. Otimização Sênior: Converte tudo para WEBP (super leve e web friendly)
-      const optimizedBuffer = await sharp(imageBuffer)
-        .resize({ width: 800, withoutEnlargement: true }) // Redimensiona no máx para 800px
-        .webp({ quality: 80 }) // Compacta em WebP com 80% de qualidade
-        .toBuffer();
-
-      // 3. Cria um nome único e seguro para o arquivo
-      const fileHash = crypto.randomBytes(8).toString('hex');
-      const fileName = `products/${request.params.id}-${fileHash}.webp`;
-
-      // 4. Envia para o Cloudflare R2
-      await r2Client.send(
-        new PutObjectCommand({
-          Bucket: process.env.R2_BUCKET_NAME,
-          Key: fileName,
-          Body: optimizedBuffer,
-          ContentType: 'image/webp',
-          // Opcional: Cache-Control para o navegador do cliente não ficar baixando a imagem toda hora
-          CacheControl: 'public, max-age=31536000, immutable' 
-        })
-      );
-
-      // 5. Monta a URL pública (usando a variável de ambiente)
-      const publicUrl = `${process.env.R2_PUBLIC_URL}/${fileName}`;
-
-      // 6. Atualiza o banco de dados com a nova URL (e a Key para deleção futura)
+      // Atualiza o produto com a URL retornada
       await this.service.update(request.params.id, { 
-        imageUrl: publicUrl,
-        imageKey: fileName // Salvamos a chave para quando formos apagar o produto, apagar do bucket também
+        imageUrl: url,
+        imageKey: key 
       });
 
-      return reply.send({ 
-        message: 'Upload otimizado concluído com sucesso!', 
-        imageUrl: publicUrl 
-      });
-
+      return reply.send({ url });
     } catch (error) {
-      console.error('Erro no upload para o R2:', error);
-      return reply.status(500).send({ error: 'Falha interna ao processar a imagem.' });
+      return reply.status(500).send({ error: 'Erro no storage' });
     }
+  }
+
+  async toggleStatus(request: FastifyRequest<{ Params: { id: string }, Body: { isActive: boolean } }>, reply: FastifyReply) {
+    const { isActive } = request.body;
+    const data = await this.service.toggleStatus(request.params.id, isActive);
+    return reply.send(data);
   }
 }

@@ -28,8 +28,10 @@ app.setErrorHandler(errorHandler);
 // Segurança base
 app.register(helmet);
 app.register(cors, {
-  origin: true, // Em produção, colocar a URL do frontend Angular
+  origin: '*',
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'], // 👈 O PATCH e OPTIONS precisam estar aqui!
+  allowedHeaders: ['Content-Type', 'Authorization'],
 });
 app.register(jwt, {
   secret: env.JWT_SECRET,

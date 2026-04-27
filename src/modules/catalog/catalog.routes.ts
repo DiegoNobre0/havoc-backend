@@ -3,10 +3,10 @@ import { ZodTypeProvider } from 'fastify-type-provider-zod';
 
 
 // Imports dos Schemas
-import { 
-  idParamSchema, createCategorySchema, updateCategorySchema, 
-  productQuerySchema, createProductSchema, updateProductSchema, 
-  createKitSchema, 
+import {
+  idParamSchema, createCategorySchema, updateCategorySchema,
+  productQuerySchema, createProductSchema, updateProductSchema,
+  createKitSchema,
   kitQuerySchema
 } from './catalog.schemas.js';
 import { CategoryController } from './categories/category.controller.js';
@@ -71,6 +71,13 @@ export async function catalogRoutes(app: FastifyInstance) {
     schema: { tags: ['Catálogo - Produtos'], summary: 'Upload de imagem (JPEG/PNG/WEBP)' }
   }, productController.uploadImage.bind(productController));
 
+  app.withTypeProvider<ZodTypeProvider>().patch('/products/:id/status', {
+    schema: {
+      tags: ['Catálogo - Produtos'],
+      params: idParamSchema,
+      // Você pode tipar o body com z.object({ isActive: z.boolean() }) se quiser ser estrito
+    }
+  }, productController.toggleStatus.bind(productController));
 
   // ==========================================
   // 🎁 ROTAS DE KITS PROMOCIONAIS

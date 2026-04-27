@@ -13,10 +13,13 @@ function getRandomDate(daysBack: number) {
 async function main() {
   console.log('🌱 Iniciando o Seed da Havoc...');
 
-  // 1. Limpar dados antigos (para não duplicar infinitamente)
-  console.log('🧹 Limpando pedidos antigos...');
+  // 1. Limpar dados antigos (Na ordem certa para evitar erros de Foreign Key)
+  console.log('🧹 Limpando o banco de dados...');
   await prisma.orderItem.deleteMany();
   await prisma.order.deleteMany();
+  // Se tiver a tabela de Kits já criada, descomente as duas linhas abaixo:
+  // await prisma.kitItem.deleteMany();
+  // await prisma.kit.deleteMany();
   await prisma.product.deleteMany();
   await prisma.category.deleteMany();
 
@@ -27,30 +30,53 @@ async function main() {
     create: {
       name: 'João Cliente VIP',
       email: 'cliente@teste.com',
-      password: 'hash_falso_aqui', // Não importa pro seed
+      password: 'hash_falso_aqui', 
       role: 'VISUALIZADOR',
     },
   });
 
   // 3. Criar Categorias
-  console.log('📦 Criando Categorias e Produtos...');
+  console.log('📦 Criando Categorias...');
   const catProteina = await prisma.category.create({
     data: { name: 'Proteínas', slug: 'proteinas' }
   });
   const catEnergia = await prisma.category.create({
     data: { name: 'Energia & Foco', slug: 'energia-foco' }
   });
+  const catMaisVendidos = await prisma.category.create({
+    data: { name: 'Mais Vendidos', slug: 'mais-vendidos' } // 👈 Nova categoria extra!
+  });
 
-  // 4. Criar Produtos Reais da Havoc
+  // 4. Criar Produtos Reais da Havoc (Agora com N:N usando connect)
+  console.log('📦 Criando Produtos e conectando múltiplas categorias...');
   const products = await Promise.all([
     prisma.product.create({
-      data: { name: 'Havoc Whey Isolado 1kg', slug: 'havoc-whey-1kg', price: 189.90, stock: 150, categoryId: catProteina.id }
+      data: { 
+        name: 'Havoc Whey Isolado 1kg', 
+        slug: 'havoc-whey-1kg', 
+        price: 189.90, 
+        stock: 150, 
+        // 👇 Conectando a 2 categorias ao mesmo tempo!
+        categories: { connect: [{ id: catProteina.id }, { id: catMaisVendidos.id }] } 
+      }
     }),
     prisma.product.create({
-      data: { name: 'Creatina Monohidratada 300g', slug: 'creatina-300g', price: 99.90, stock: 200, categoryId: catProteina.id }
+      data: { 
+        name: 'Creatina Monohidratada 300g', 
+        slug: 'creatina-300g', 
+        price: 99.90, 
+        stock: 200, 
+        categories: { connect: [{ id: catProteina.id }] } 
+      }
     }),
     prisma.product.create({
-      data: { name: 'Nuclear Pre-Workout', slug: 'nuclear-pre', price: 149.90, stock: 85, categoryId: catEnergia.id }
+      data: { 
+        name: 'Nuclear Pre-Workout', 
+        slug: 'nuclear-pre', 
+        price: 149.90, 
+        stock: 85, 
+        categories: { connect: [{ id: catEnergia.id }, { id: catMaisVendidos.id }] } 
+      }
     })
   ]);
 
@@ -59,7 +85,6 @@ async function main() {
   const statuses: OrderStatus[] = ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'PENDING'];
   
   for (let i = 1; i <= 45; i++) {
-    // Escolhe produtos aleatórios para o pedido
     const numItems = Math.floor(Math.random() * 3) + 1;
     const orderProducts = products.sort(() => 0.5 - Math.random()).slice(0, numItems);
     
@@ -81,9 +106,8 @@ async function main() {
     const shippingCost = 15.00;
     const total = subtotal + shippingCost;
     
-    // Status aleatório (tendência maior para pago/entregue)
     const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
-    const orderDate = getRandomDate(30); // Distribui as vendas nos últimos 30 dias
+    const orderDate = getRandomDate(30); 
 
     await prisma.order.create({
       data: {
@@ -101,7 +125,7 @@ async function main() {
     });
   }
 
-  console.log('✅ Seed concluído com sucesso! 45 pedidos gerados.');
+  console.log('✅ Seed concluído com sucesso! Banco populado com N:N.');
 }
 
 main()
