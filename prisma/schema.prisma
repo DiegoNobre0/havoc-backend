@@ -147,6 +147,7 @@ model Kit {
 
   items          KitItem[]
   orderItems     OrderItem[]
+  
 
   @@index([slug])
   @@index([deletedAt])

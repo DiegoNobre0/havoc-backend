@@ -75,4 +75,10 @@ export class KitController {
             return reply.status(500).send({ error: 'Falha interna ao processar a imagem do kit.' });
         }
     }
+
+    async toggleStatus(request: FastifyRequest<{ Params: { id: string }, Body: { isActive: boolean } }>, reply: FastifyReply) {
+        const { isActive } = request.body;
+        const data = await this.service.toggleStatus(request.params.id, isActive);
+        return reply.send(data);
+    }
 }

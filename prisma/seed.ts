@@ -1,4 +1,5 @@
 import { PrismaClient, OrderStatus } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
@@ -23,6 +24,7 @@ async function main() {
   await prisma.product.deleteMany();
   await prisma.category.deleteMany();
 
+  const hashedPassword = await bcrypt.hash('123456', 12);
   // 2. Criar Cliente Fictício
   const customer = await prisma.user.upsert({
     where: { email: 'cliente@teste.com' },
@@ -30,8 +32,8 @@ async function main() {
     create: {
       name: 'João Cliente VIP',
       email: 'cliente@teste.com',
-      password: 'hash_falso_aqui', 
-      role: 'VISUALIZADOR',
+      password: hashedPassword,
+      role: 'ADMIN',
     },
   });
 

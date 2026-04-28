@@ -102,4 +102,15 @@ export async function catalogRoutes(app: FastifyInstance) {
   app.post('/kits/:id/image', {
     schema: { tags: ['Catálogo - Kits'], summary: 'Upload de foto promocional do Kit (JPEG/PNG/WEBP)' }
   }, kitController.uploadImage.bind(kitController));
+
+   app.withTypeProvider<ZodTypeProvider>().patch('/kits/:id/status', {
+    schema: {
+      tags: ['Catálogo - Kits'],
+      params: idParamSchema,
+      body: z.object({
+      isActive: z.boolean() 
+    })
+     
+    }
+  }, kitController.toggleStatus.bind(kitController));
 }

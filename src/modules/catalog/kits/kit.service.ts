@@ -1,4 +1,5 @@
 import { prisma } from "../../../database/prisma.js";
+import { redis } from "../../../shared/redis/redis.js";
 
 
 interface KitCreateData {
@@ -10,8 +11,13 @@ interface KitCreateData {
 }
 
 export class KitService {
+ private CACHE_PREFIX = 'catalog:kits:';
+  private async clearCache() {
+      const keys = await redis.keys(`${this.CACHE_PREFIX}*`);
+      if (keys.length > 0) await redis.del(keys);
+    }
 
-  async findMany(page: number, limit: number, search?: string) {
+async findMany(page: number, limit: number, search?: string) {
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
 
@@ -25,11 +31,25 @@ export class KitService {
         where,
         skip,
         take: limit,
-        // Incluímos os itens do kit e os dados básicos do produto para o Frontend
+        // Mergulhando nos relacionamentos: Kit -> Itens -> Produto -> Categorias
         include: { 
           items: { 
             include: { 
-              product: { select: { name: true, price: true, imageUrl: true } } 
+              product: { 
+                select: { 
+                  id: true, // Sempre bom retornar o ID
+                  name: true, 
+                  price: true, 
+                  imageUrl: true,
+                  // 👉 Trazendo as categorias do produto
+                  categories: {
+                    select: {
+                      id: true,
+                      name: true
+                    }
+                  }
+                } 
+              } 
             } 
           } 
         },
@@ -104,5 +124,15 @@ export class KitService {
       where: { id },
       data
     });
+  }
+
+  async toggleStatus(id: string, isActive: boolean) {
+    const kit = await prisma.kit.update({
+      where: { id },
+      data: { isActive },
+      select: { id: true, isActive: true } // Retorna só o essencial para economizar banda
+    });
+    await this.clearCache(); // Se você estiver usando Redis para kits, lembre de limpar aqui!
+    return kit;
   }
 }
