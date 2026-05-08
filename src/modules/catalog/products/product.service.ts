@@ -20,7 +20,7 @@ export class ProductService {
     const where: any = { deletedAt: null };
 
     if (search) where.name = { contains: search, mode: 'insensitive' };
-    
+
     // 👉 Busca produtos que tenham ALGUMA categoria com este ID
     if (categoryId) {
       where.categories = { some: { id: categoryId } };
@@ -46,9 +46,9 @@ export class ProductService {
     return result;
   }
 
-async create(data: any) {
+  async create(data: any) {
     const { categoryIds, ...rest } = data;
-    
+
     // 1. Verifica se o slug já existe
     const existingProduct = await prisma.product.findUnique({
       where: { slug: rest.slug }
@@ -60,26 +60,26 @@ async create(data: any) {
       rest.slug = `${rest.slug}-${hash}`;
     }
 
-    const product = await prisma.product.create({ 
+    const product = await prisma.product.create({
       data: {
         ...rest,
         categories: categoryIds ? { connect: categoryIds.map((id: string) => ({ id })) } : undefined
-      } 
+      }
     });
 
     await this.clearCache();
     return product;
-}
+  }
 
-async update(id: string, data: any) {
+  async update(id: string, data: any) {
     const { categoryIds, ...rest } = data;
-    const product = await prisma.product.update({ 
-      where: { id }, 
+    const product = await prisma.product.update({
+      where: { id },
       data: {
         ...rest,
         // O "set" limpa as relações antigas e cria as novas
         categories: categoryIds ? { set: categoryIds.map((id: string) => ({ id })) } : undefined
-      } 
+      }
     });
     await this.clearCache();
     return product;

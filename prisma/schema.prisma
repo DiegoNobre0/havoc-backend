@@ -61,16 +61,16 @@ enum ShippingType {
 // ============================================================
 
 model User {
-  id           String    @id @default(uuid())
-  name         String
-  email        String    @unique
-  password     String
-  role         Role      @default(OPERADOR)
-  isActive     Boolean   @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  deletedAt    DateTime?
+  id          String    @id @default(uuid())
+  name        String
+  email       String    @unique
+  password    String
+  role        Role      @default(OPERADOR)
+  isActive    Boolean   @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
 
   orders       Order[]
   chatSessions ChatSession[]
@@ -95,7 +95,7 @@ model Category {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
-  products    Product[]
+  products Product[]
 
   @@index([slug])
   @@index([deletedAt])
@@ -103,51 +103,48 @@ model Category {
 }
 
 model Product {
-  id           String    @id @default(uuid())
-  name         String
-  slug         String    @unique
-  description  String?
-  price        Decimal   @db.Decimal(10, 2)
-  stock        Int       @default(0)
-  sku          String?   @unique
-  imageUrl     String?
-  imageKey     String?   // S3 key para deleção
-  isActive     Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  deletedAt    DateTime?
+  id          String    @id @default(uuid())
+  name        String
+  slug        String    @unique
+  description String?
+  price       Decimal   @db.Decimal(10, 2)
+  stock       Int       @default(0)
+  sku         String?   @unique
+  imageUrl    String?
+  imageKey    String? // S3 key para deleção
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
 
+  categories Category[]
 
-  categories  Category[]
-
-  kitItems     KitItem[]
-  orderItems   OrderItem[]
+  kitItems   KitItem[]
+  orderItems OrderItem[]
 
   @@index([slug])
-
   @@index([deletedAt])
   @@index([isActive])
   @@map("products")
 }
 
 model Kit {
-  id             String    @id @default(uuid())
-  name           String
-  slug           String    @unique
-  description    String?
-  imageUrl       String?
-  imageKey       String?
-  discountType   String    @default("PERCENTAGE") // PERCENTAGE | FIXED
-  discountValue  Decimal   @db.Decimal(10, 2)
-  finalPrice     Decimal   @db.Decimal(10, 2)
-  isActive       Boolean   @default(true)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  deletedAt      DateTime?
+  id            String    @id @default(uuid())
+  name          String
+  slug          String    @unique
+  description   String?
+  imageUrl      String?
+  imageKey      String?
+  discountType  String    @default("PERCENTAGE") // PERCENTAGE | FIXED
+  discountValue Decimal   @db.Decimal(10, 2)
+  finalPrice    Decimal   @db.Decimal(10, 2)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
 
-  items          KitItem[]
-  orderItems     OrderItem[]
-  
+  items      KitItem[]
+  orderItems OrderItem[]
 
   @@index([slug])
   @@index([deletedAt])
@@ -155,15 +152,15 @@ model Kit {
 }
 
 model KitItem {
-  id         String   @id @default(uuid())
-  quantity   Int      @default(1)
-  createdAt  DateTime @default(now())
+  id        String   @id @default(uuid())
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now())
 
-  kitId      String
-  kit        Kit      @relation(fields: [kitId], references: [id], onDelete: Cascade)
+  kitId String
+  kit   Kit    @relation(fields: [kitId], references: [id], onDelete: Cascade)
 
-  productId  String
-  product    Product  @relation(fields: [productId], references: [id])
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
 
   @@unique([kitId, productId])
   @@map("kit_items")
@@ -174,27 +171,27 @@ model KitItem {
 // ============================================================
 
 model Order {
-  id              String      @id @default(uuid())
-  code            String      @unique // ex: HAV-00001
-  status          OrderStatus @default(PENDING)
-  subtotal        Decimal     @db.Decimal(10, 2)
-  shippingCost    Decimal     @db.Decimal(10, 2) @default(0)
-  discount        Decimal     @db.Decimal(10, 2) @default(0)
-  total           Decimal     @db.Decimal(10, 2)
-  notes           String?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  deletedAt       DateTime?
+  id           String      @id @default(uuid())
+  code         String      @unique // ex: HAV-00001
+  status       OrderStatus @default(PENDING)
+  subtotal     Decimal     @db.Decimal(10, 2)
+  shippingCost Decimal     @default(0) @db.Decimal(10, 2)
+  discount     Decimal     @default(0) @db.Decimal(10, 2)
+  total        Decimal     @db.Decimal(10, 2)
+  notes        String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  deletedAt    DateTime?
 
-  userId          String
-  user            User        @relation(fields: [userId], references: [id])
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 
-  shippingRuleId  String?
-  shippingRule    ShippingRule? @relation(fields: [shippingRuleId], references: [id])
+  shippingRuleId String?
+  shippingRule   ShippingRule? @relation(fields: [shippingRuleId], references: [id])
 
-  items           OrderItem[]
-  payment         Payment?
-  statusHistory   OrderStatusHistory[]
+  items         OrderItem[]
+  payment       Payment?
+  statusHistory OrderStatusHistory[]
 
   @@index([userId])
   @@index([status])
@@ -204,20 +201,20 @@ model Order {
 }
 
 model OrderItem {
-  id          String   @id @default(uuid())
-  quantity    Int
-  unitPrice   Decimal  @db.Decimal(10, 2)
-  totalPrice  Decimal  @db.Decimal(10, 2)
-  createdAt   DateTime @default(now())
+  id         String   @id @default(uuid())
+  quantity   Int
+  unitPrice  Decimal  @db.Decimal(10, 2)
+  totalPrice Decimal  @db.Decimal(10, 2)
+  createdAt  DateTime @default(now())
 
-  orderId     String
-  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  productId   String?
-  product     Product? @relation(fields: [productId], references: [id])
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id])
 
-  kitId       String?
-  kit         Kit?     @relation(fields: [kitId], references: [id])
+  kitId String?
+  kit   Kit?    @relation(fields: [kitId], references: [id])
 
   @@index([orderId])
   @@map("order_items")
@@ -229,8 +226,8 @@ model OrderStatusHistory {
   note      String?
   createdAt DateTime    @default(now())
 
-  orderId   String
-  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@map("order_status_history")
@@ -241,22 +238,22 @@ model OrderStatusHistory {
 // ============================================================
 
 model Payment {
-  id              String        @id @default(uuid())
-  method          PaymentMethod
-  status          PaymentStatus @default(PENDING)
-  amount          Decimal       @db.Decimal(10, 2)
-  pixCode         String?       @db.Text  // copia-e-cola
-  pixQrCodeUrl    String?                 // URL da imagem do QR Code
-  paymentLink     String?
-  externalId      String?       @unique   // ID retornado pelo banco digital
-  webhookPayload  Json?                   // payload cru do webhook
-  paidAt          DateTime?
-  expiresAt       DateTime?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id             String        @id @default(uuid())
+  method         PaymentMethod
+  status         PaymentStatus @default(PENDING)
+  amount         Decimal       @db.Decimal(10, 2)
+  pixCode        String?       @db.Text // copia-e-cola
+  pixQrCodeUrl   String? // URL da imagem do QR Code
+  paymentLink    String?
+  externalId     String?       @unique // ID retornado pelo banco digital
+  webhookPayload Json? // payload cru do webhook
+  paidAt         DateTime?
+  expiresAt      DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
-  orderId         String        @unique
-  order           Order         @relation(fields: [orderId], references: [id])
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id])
 
   @@index([status])
   @@index([externalId])
@@ -269,16 +266,16 @@ model Payment {
 // ============================================================
 
 model ChatSession {
-  id          String        @id @default(uuid())
-  sessionKey  String        @unique @default(uuid())
-  isActive    Boolean       @default(true)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id                 String    @id @default(uuid())
+  sessionKey         String    @unique @default(uuid())
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  handoffRequestedAt DateTime?
+  userId             String?
+  user               User?     @relation(fields: [userId], references: [id])
 
-  userId      String?
-  user        User?         @relation(fields: [userId], references: [id])
-
-  messages    ChatMessage[]
+  messages ChatMessage[]
 
   @@index([sessionKey])
   @@index([userId])
@@ -286,14 +283,14 @@ model ChatSession {
 }
 
 model ChatMessage {
-  id          String          @id @default(uuid())
-  role        ChatMessageRole
-  content     String          @db.Text
-  tokens      Int?            // tokens consumidos (controle de custo)
-  createdAt   DateTime        @default(now())
+  id        String          @id @default(uuid())
+  role      ChatMessageRole
+  content   String          @db.Text
+  tokens    Int? // tokens consumidos (controle de custo)
+  createdAt DateTime        @default(now())
 
-  sessionId   String
-  session     ChatSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId])
   @@index([createdAt])
@@ -317,20 +314,20 @@ model ChatbotConfig {
 // ============================================================
 
 model ShippingRule {
-  id          String       @id @default(uuid())
-  name        String
-  type        ShippingType
-  cep         String?      // CEP exato ou prefixo
-  region      String?      // ex: "SP", "Sul", "Nordeste"
-  minWeight   Float?       // kg
-  maxWeight   Float?       // kg
-  price       Decimal      @db.Decimal(10, 2)
-  estimatedDays Int        @default(7)
-  isActive    Boolean      @default(true)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id            String       @id @default(uuid())
+  name          String
+  type          ShippingType
+  cep           String? // CEP exato ou prefixo
+  region        String? // ex: "SP", "Sul", "Nordeste"
+  minWeight     Float? // kg
+  maxWeight     Float? // kg
+  price         Decimal      @db.Decimal(10, 2)
+  estimatedDays Int          @default(7)
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
-  orders      Order[]
+  orders Order[]
 
   @@index([type])
   @@index([isActive])
@@ -342,17 +339,17 @@ model ShippingRule {
 // ============================================================
 
 model AuditLog {
-  id         String   @id @default(uuid())
-  action     String   // ex: "USER_LOGIN", "PRODUCT_CREATED", "PAYMENT_CONFIRMED"
-  entity     String?  // ex: "Product", "Order"
-  entityId   String?
-  payload    Json?    // dados relevantes da ação
-  ip         String?
-  userAgent  String?
-  createdAt  DateTime @default(now())
+  id        String   @id @default(uuid())
+  action    String // ex: "USER_LOGIN", "PRODUCT_CREATED", "PAYMENT_CONFIRMED"
+  entity    String? // ex: "Product", "Order"
+  entityId  String?
+  payload   Json? // dados relevantes da ação
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
 
-  userId     String?
-  user       User?    @relation(fields: [userId], references: [id])
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([action])

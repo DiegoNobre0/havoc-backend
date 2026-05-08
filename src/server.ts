@@ -2,7 +2,8 @@
 import { app } from './app.js';
 import { env } from './env/index.js';
 import { logger } from './shared/logger.js';
-
+import '../src/integrations/IA/chatbot.worker.js'; 
+// Importa o worker do chatbot para que ele comece a processar os jobs da fila
 async function bootstrap() {
   try {
     await app.listen({ port: env.PORT, host: '0.0.0.0' });

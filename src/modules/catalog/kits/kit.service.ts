@@ -3,21 +3,21 @@ import { redis } from "../../../shared/redis/redis.js";
 
 
 interface KitCreateData {
-    name: string;
-    slug: string;
-    discountType: 'PERCENTAGE' | 'FIXED';
-    discountValue: number;
-    productItems: { productId: string; quantity: number }[];
+  name: string;
+  slug: string;
+  discountType: 'PERCENTAGE' | 'FIXED';
+  discountValue: number;
+  productItems: { productId: string; quantity: number }[];
 }
 
 export class KitService {
- private CACHE_PREFIX = 'catalog:kits:';
+  private CACHE_PREFIX = 'catalog:kits:';
   private async clearCache() {
-      const keys = await redis.keys(`${this.CACHE_PREFIX}*`);
-      if (keys.length > 0) await redis.del(keys);
-    }
+    const keys = await redis.keys(`${this.CACHE_PREFIX}*`);
+    if (keys.length > 0) await redis.del(keys);
+  }
 
-async findMany(page: number, limit: number, search?: string) {
+  async findMany(page: number, limit: number, search?: string) {
     const skip = (page - 1) * limit;
     const where: any = { deletedAt: null };
 
@@ -32,14 +32,14 @@ async findMany(page: number, limit: number, search?: string) {
         skip,
         take: limit,
         // Mergulhando nos relacionamentos: Kit -> Itens -> Produto -> Categorias
-        include: { 
-          items: { 
-            include: { 
-              product: { 
-                select: { 
+        include: {
+          items: {
+            include: {
+              product: {
+                select: {
                   id: true, // Sempre bom retornar o ID
-                  name: true, 
-                  price: true, 
+                  name: true,
+                  price: true,
                   imageUrl: true,
                   // 👉 Trazendo as categorias do produto
                   categories: {
@@ -48,10 +48,10 @@ async findMany(page: number, limit: number, search?: string) {
                       name: true
                     }
                   }
-                } 
-              } 
-            } 
-          } 
+                }
+              }
+            }
+          }
         },
         orderBy: { createdAt: 'desc' }
       })
@@ -63,66 +63,88 @@ async findMany(page: number, limit: number, search?: string) {
     };
   }
 
-    async createKit(data: KitCreateData) {
-        // 1. Busca os preços originais dos produtos
-        const productIds = data.productItems.map(item => item.productId);
-        const products = await prisma.product.findMany({
-            where: { id: { in: productIds }, deletedAt: null }
-        });
+  async createKit(data: KitCreateData) {
+    // 1. Busca os preços originais dos produtos
+    const productIds = data.productItems.map(item => item.productId);
+    const products = await prisma.product.findMany({
+      where: { id: { in: productIds }, deletedAt: null }
+    });
 
-        if (products.length !== productIds.length) {
-            throw new Error('Um ou mais produtos informados não existem ou foram removidos.');
-        }
-
-        // 2. Calcula o Subtotal base (Quantidade x Preço Unitário)
-        let subtotal = 0;
-        data.productItems.forEach(item => {
-            const product = products.find((p: any) => p.id === item.productId);
-            if (product) {
-                subtotal += Number(product.price) * item.quantity;
-            }
-        });
-
-        // 3. Calcula o Preço Final aplicando o desconto
-        let finalPrice = subtotal;
-        if (data.discountType === 'PERCENTAGE') {
-            finalPrice = subtotal - (subtotal * (data.discountValue / 100));
-        } else if (data.discountType === 'FIXED') {
-            finalPrice = subtotal - data.discountValue;
-        }
-
-        // 4. Cria o Kit e os Itens do Kit em uma única Transação
-        return prisma.kit.create({
-            data: {
-                name: data.name,
-                slug: data.slug,
-                discountType: data.discountType,
-                discountValue: data.discountValue,
-                finalPrice: finalPrice,
-                items: {
-                    create: data.productItems.map(item => ({
-                        productId: item.productId,
-                        quantity: item.quantity
-                    }))
-                }
-            },
-            include: { items: { include: { product: true } } }
-        });
+    if (products.length !== productIds.length) {
+      throw new Error('Um ou mais produtos informados não existem ou foram removidos.');
     }
 
-    // Soft Delete do Kit
-    async softDelete(id: string) {
-        return prisma.kit.update({
-            where: { id },
-            data: { deletedAt: new Date(), isActive: false }
-        });
+    // 2. Calcula o Subtotal base (Quantidade x Preço Unitário)
+    let subtotal = 0;
+    data.productItems.forEach(item => {
+      const product = products.find((p: any) => p.id === item.productId);
+      if (product) {
+        subtotal += Number(product.price) * item.quantity;
+      }
+    });
+
+    // 3. Calcula o Preço Final aplicando o desconto
+    let finalPrice = subtotal;
+    if (data.discountType === 'PERCENTAGE') {
+      finalPrice = subtotal - (subtotal * (data.discountValue / 100));
+    } else if (data.discountType === 'FIXED') {
+      finalPrice = subtotal - data.discountValue;
     }
 
+    // 4. Cria o Kit e os Itens do Kit em uma única Transação
+    return prisma.kit.create({
+      data: {
+        name: data.name,
+        slug: data.slug,
+        discountType: data.discountType,
+        discountValue: data.discountValue,
+        finalPrice: finalPrice,
+        items: {
+          create: data.productItems.map(item => ({
+            productId: item.productId,
+            quantity: item.quantity
+          }))
+        }
+      },
+      include: { items: { include: { product: true } } }
+    });
+  }
 
-    async update(id: string, data: any) {
+  // Soft Delete do Kit
+  async softDelete(id: string) {
     return prisma.kit.update({
       where: { id },
-      data
+      data: { deletedAt: new Date(), isActive: false }
+    });
+  }
+
+
+  async update(id: string, data: any) {
+    // Desestrutura productItems do restante dos dados do kit
+    const { productItems, ...kitData } = data;
+
+    // Prepara o objeto de payload para o Prisma
+    const prismaUpdateData: any = {
+      ...kitData,
+    };
+
+    // Se productItems estiver presente na requisição, configura a atualização da relação
+    if (productItems) {
+      prismaUpdateData.items = {
+        // Remove todos os itens anteriores vinculados a este kit
+        deleteMany: {},
+        // Cria os novos itens com base no array recebido
+        create: productItems.map((item: any) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+        })),
+      };
+    }
+
+    // Executa a atualização no banco de dados
+    return prisma.kit.update({
+      where: { id },
+      data: prismaUpdateData,
     });
   }
 

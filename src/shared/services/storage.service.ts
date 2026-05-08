@@ -15,36 +15,41 @@ export class StorageService {
   async uploadFile(folder: string, file: any) {
     const fileBuffer = await file.toBuffer();
     const fileHash = crypto.randomBytes(8).toString('hex');
-    const extension = file.mimetype.split('/')[1];
+    const originalExtension = file.mimetype.split('/')[1];
     
     let finalBuffer = fileBuffer;
-    let fileName = `${folder}/${fileHash}-${Date.now()}.${extension}`;
+    let fileName = `${folder}/${fileHash}-${Date.now()}.${originalExtension}`;
     let contentType = file.mimetype;
 
     // ⚡ Otimização de Imagens (Opcional - Apenas se for imagem)
     if (file.mimetype.startsWith('image/') && !file.mimetype.includes('gif')) {
+      
+      // 👇 Verifica se é PNG para manter a transparência, senão vira JPG
+      const isPng = file.mimetype === 'image/png';
+      const finalExt = isPng ? 'png' : 'jpg';
+      contentType = isPng ? 'image/png' : 'image/jpeg';
+
       finalBuffer = await sharp(fileBuffer)
         .resize({ width: 1000, withoutEnlargement: true })
-        .webp({ quality: 80 })
+        .toFormat(isPng ? 'png' : 'jpeg', { quality: 80 })
         .toBuffer();
       
-      fileName = `${folder}/${fileHash}-${Date.now()}.webp`;
-      contentType = 'image/webp';
+      fileName = `${folder}/${fileHash}-${Date.now()}.${finalExt}`;
     }
 
     // Envio para o R2
     await r2Client.send(
       new PutObjectCommand({
-        Bucket: this.bucketName,
+        Bucket: this.bucketName, // Certifique-se que this.bucketName está acessível aqui
         Key: fileName,
         Body: finalBuffer,
-        ContentType: contentType,
+        ContentType: contentType, // Usa o formato certinho pro WhatsApp ler
         CacheControl: 'public, max-age=31536000, immutable'
       })
     );
 
     return {
-      url: `${this.publicUrl}/${fileName}`,
+      url: `${this.publicUrl}/${fileName}`, // Certifique-se que this.publicUrl está acessível
       key: fileName
     };
   }

@@ -15,9 +15,13 @@ import { authRoutes } from './modules/auth/auth.routes.js';
 import { usersRoutes } from './modules/users/users.routes.js';
 import { dashboardRoutes } from './modules/dashboard/dashboard.routes.js';
 import { catalogRoutes } from './modules/catalog/catalog.routes.js';
+import { whatsappWebhookRoutes } from './modules/whatsappWebhook/whatsAppWebhook.routes.js';
+import { chatbotRoutes } from './modules/chatbot/chatbot.routes.js';
+import { shippingRoutes } from './modules/shipping/shipping.routes.js';
 
 export const app = fastify({
   loggerInstance: logger, 
+  
 });
 
 app.setValidatorCompiler(validatorCompiler);
@@ -79,3 +83,6 @@ app.register(usersRoutes, { prefix: '/users' });
 app.register(authRoutes, { prefix: '/auth' });
 app.register(dashboardRoutes, { prefix: '/dashboard' });
 app.register(catalogRoutes, { prefix: '/catalog' });
+app.register(whatsappWebhookRoutes, { prefix: '/webhook/whatsapp' });
+app.register(chatbotRoutes, { prefix: '/chatbot' })
+app.register(shippingRoutes, { prefix: '/shipping' });
