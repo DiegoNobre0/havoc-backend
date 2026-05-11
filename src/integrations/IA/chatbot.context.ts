@@ -1,4 +1,5 @@
 import { prisma } from '../../database/prisma.js';
+import { PaymentsService } from '../../modules/payments/payments.service.js';
 
 export class ChatbotContext {
 
@@ -131,17 +132,14 @@ export class ChatbotContext {
     return text;
   }
 
-
-  // 👉 NOVA FUNÇÃO: Transforma a conversa em um Pedido Real no banco
-  // 👉 NOVA FUNÇÃO: Transforma a conversa em um Pedido Real no banco (AGORA ACEITANDO KITS!)
   async gerarCheckout(sessionKey: string, dadosCheckout: any): Promise<string> {
     try {
       // 1. Busca o usuário dono desse telefone, ou cria um na hora
       let user = await prisma.user.findFirst({ /* lógica para achar o user pelo telefone da sessionKey */ });
 
-      if (!user) {
-        user = await prisma.user.findFirst(); // Mock rápido para não quebrar
-      }
+      // if (!user) {
+      //   user = await prisma.user.findFirst(); 
+      // }
 
       let subtotal = 0;
       const orderItemsData = [];
@@ -149,7 +147,6 @@ export class ChatbotContext {
 
       // 2. Itera sobre os produtos/kits que a IA enviou
       for (const item of dadosCheckout.produtos) {
-
         // --- TENTATIVA 1: É UM PRODUTO ISOLADO? ---
         const produtoBanco = await prisma.product.findFirst({
           where: { name: { contains: item.nome_produto, mode: 'insensitive' } }
@@ -165,33 +162,30 @@ export class ChatbotContext {
             unitPrice: produtoBanco.price,
             totalPrice: itemTotal,
           });
-          continue; // Achou como produto, pula pro próximo item do laço
+          continue;
         }
 
         // --- TENTATIVA 2: É UM KIT PROMOCIONAL? ---
         const kitBanco = await prisma.kit.findFirst({
           where: { name: { contains: item.nome_produto, mode: 'insensitive' } },
-          include: { items: true } // Traz os itens que compõem o kit
+          include: { items: true }
         });
 
         if (kitBanco) {
           const itemTotal = Number(kitBanco.finalPrice) * item.quantidade;
           subtotal += itemTotal;
 
-          // DESEMPACOTAMENTO: Adiciona os produtos do kit no pedido individualmente
           for (const kitItem of kitBanco.items) {
             orderItemsData.push({
               productId: kitItem.productId,
               quantity: kitItem.quantity * item.quantidade,
-              // Registra o valor unitário como zero (ou simbólico) pois o valor total do pedido já absorveu o preço final do kit
               unitPrice: 0,
               totalPrice: 0,
             });
           }
-          continue; // Achou como kit, pula pro próximo item
+          continue;
         }
 
-        // --- SE CHEGOU AQUI, A IA INVENTOU NOME OU O ESTOQUE ZEROU ---
         itensNaoEncontrados.push(item.nome_produto);
       }
 
@@ -222,11 +216,29 @@ export class ChatbotContext {
         }
       });
 
-      // 5. DEVOLVE O TEXTO PRONTO PARA A IA MANDAR PRO CLIENTE
+      // 🔥 5. INTEGRAÇÃO MERCADO PAGO: Gera a cobrança na hora 🔥
+      const paymentsService = new PaymentsService();
+      let pixCopiaECola = '';
+      let linkPagamento = '';
+
+      if (dadosCheckout.metodo_pagamento === 'PIX') {
+        const pixData = await paymentsService.generatePix(
+          novoPedido.id,
+          'cliente@havoc.com.br', // E-mail obrigatório do MP
+          'Cliente Havoc'         // Nome obrigatório do MP
+        );
+        // 👇 Pega o código gerado pelo Mercado Pago
+        pixCopiaECola = pixData.pixCode || '';
+
+      } else if (dadosCheckout.metodo_pagamento === 'CARTAO') {
+        const linkData = await paymentsService.generateLink(novoPedido.id);
+        linkPagamento = linkData.paymentLink || '';
+      }
+
+      // 6. DEVOLVE O TEXTO PRONTO PARA A IA MANDAR PRO CLIENTE
       let textoResposta = `✅ *Pedido #${novoPedido.code} Gerado com Sucesso!*\n\n`;
       textoResposta += `*Resumo da Compra:*\n`;
 
-      // Itera em cima dos nomes originais que a IA capturou (Kit ou Produto)
       dadosCheckout.produtos.forEach((p: any) => {
         textoResposta += `- ${p.quantidade}x ${p.nome_produto}\n`;
       });
@@ -235,12 +247,26 @@ export class ChatbotContext {
       textoResposta += `\nFrete: R$ ${frete.toFixed(2)}`;
       textoResposta += `\n*TOTAL: R$ ${total.toFixed(2)}*\n\n`;
 
+      // 7. INJETA O QR CODE E AS INSTRUÇÕES DE PAGAMENTO NO FINAL
       if (dadosCheckout.metodo_pagamento === 'PIX') {
+
+        if (pixCopiaECola) {
+          const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(pixCopiaECola)}`;
+          textoResposta = `[IMG:${qrCodeUrl}]\n` + textoResposta;
+          // Injeta a tag mágica do PIX
+          textoResposta += `\n[PIX:${pixCopiaECola}]`;
+        }
+
         textoResposta += `👇 *PAGAMENTO VIA PIX* 👇\n`;
-        textoResposta += `Copia e Cola: \`00020126360014BR.GOV.BCB.PIX... (Seu Pix aqui)\`\n\n`;
-        textoResposta += `Assim que fizer o pagamento, me envie o comprovante por aqui mesmo para eu liberar seu pedido na expedição! 🚀`;
+        textoResposta += `Para pagar, escaneie o *QR Code* da imagem acima ou copie o código abaixo.\n`;
+        textoResposta += `_(Enviamos o código copia-e-cola em uma mensagem separada para facilitar para você!)_\n\n`;
+        textoResposta += `Assim que o pagamento for aprovado, nosso sistema confirma tudo automaticamente por aqui! 🚀`;
+
       } else if (dadosCheckout.metodo_pagamento === 'CARTAO') {
-        textoResposta += `💳 Para pagar no cartão de crédito, acesse seu link seguro: https://checkout.havoc.com.br/pay/${novoPedido.code}`;
+        textoResposta += `💳 *PAGAMENTO NO CARTÃO* 💳\n`;
+        textoResposta += `Acesse seu link seguro do Mercado Pago para finalizar a compra em até 12x:\n\n`;
+        textoResposta += `${linkPagamento}\n\n`;
+        textoResposta += `Após o pagamento, seu pedido será confirmado automaticamente! 🚀`;
       } else {
         textoResposta += `💵 Pagamento em dinheiro selecionado. Deixe o valor separado para entregar ao motoboy (ou no balcão). Precisa de troco?`;
       }
@@ -253,17 +279,30 @@ export class ChatbotContext {
     }
   }
 
-
-  // LISTA: Só texto, sem foto — para a primeira apresentação
   async listarProdutos(termoBusca: string): Promise<string> {
-    // 1. Quebra o termo buscado em palavras separadas (Ex: "proteina black skull" vira ["proteina", "black", "skull"])
-    const termos = termoBusca.split(' ').filter(t => t.trim().length > 0);
 
-    // 2. Exige que TODAS as palavras digitadas apareçam no produto (seja no nome, descrição ou categoria)
+    // 1. Remove acentos, converte para minúsculas e troca português por inglês
+    let termoLimpo = termoBusca
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/creatina|creatine/g, 'creatin') // Transforma tanto A quanto E na raiz 'creatin'
+      .replace(/proteina/g, 'protein');
+
+
+    // 2. Remove palavras inúteis da frase (Adicionei "sugestao" para limpar cliques de botões)
+    const palavrasInuteis = ['preciso', 'quero', 'de', 'um', 'uma', 'gostaria', 'comprar', 'busco', 'ver', 'tem', 'sugestao'];
+
+    // 3. Quebra a busca e filtra
+    const termos = termoLimpo.split(' ').filter(t => t.trim().length > 1 && !palavrasInuteis.includes(t));
+
+    if (termos.length === 0) {
+      return 'Por favor, seja mais específico no nome do produto.';
+    }
+
+    // 4. 🔥 EXIGE QUE A PALAVRA ESTEJA NO NOME OU NA CATEGORIA (Tiramos a descrição daqui) 🔥
     const condicoesAND = termos.map(termo => ({
       OR: [
         { name: { contains: termo, mode: 'insensitive' as const } },
-        { description: { contains: termo, mode: 'insensitive' as const } },
         { categories: { some: { name: { contains: termo, mode: 'insensitive' as const } } } }
       ]
     }));
@@ -272,9 +311,9 @@ export class ChatbotContext {
       where: {
         isActive: true,
         stock: { gt: 0 },
-        AND: condicoesAND // Aqui entra a nossa busca inteligente
+        AND: condicoesAND
       },
-      take: 4,
+      take: 8,
       select: {
         name: true,
         price: true,
@@ -283,15 +322,13 @@ export class ChatbotContext {
     });
 
     if (products.length === 0) {
-      return `Não encontrei produtos para "${termoBusca}".`;
+      return `Não encontrei produtos exatamente para "${termoBusca}".`;
     }
 
     let text = `Encontrei essas opções pra você 👇\n\n`;
     products.forEach((p, i) => {
       text += `*${i + 1}. ${p.name}*\n`;
-      text += `💰 R$ ${Number(p.price).toFixed(2)}\n`;
-      if (p.description) text += `${p.description}\n`;
-      text += `\n`;
+      text += `💰 R$ ${Number(p.price).toFixed(2)}\n\n`; // Removemos a descrição e deixamos só preço e quebra de linha
     });
 
     text += `_Qual desses te interessou? Me fala o nome do produto ou o número!_`;
@@ -299,12 +336,7 @@ export class ChatbotContext {
     return text;
   }
 
-
-  // DETALHE: Com foto — quando o cliente escolher um produto OU KIT específico
-  // DETALHE: Com foto — quando o cliente escolher um produto OU KIT específico
   async verDetalhesProduto(nomeProduto: string): Promise<string> {
-    const testImageUrl = 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/Gatto_europeo4.jpg/800px-Gatto_europeo4.jpg'; // Substitua pela sua URL oficial
-
     // 1. Quebra o termo buscado em palavras separadas (Mini-Google)
     const termos = nomeProduto.split(' ').filter(t => t.trim().length > 0);
     const condicoesAND = termos.map(termo => ({
@@ -316,21 +348,29 @@ export class ChatbotContext {
       where: {
         isActive: true,
         stock: { gt: 0 },
-        AND: condicoesAND // <-- Busca inteligente aqui
+        AND: condicoesAND
       },
       select: {
         name: true,
         price: true,
         description: true,
-        imageUrl: true, 
+        imageUrl: true,
       }
     });
 
     if (product) {
-      let imageUrl = (product as any).imageUrl;
-      if (!imageUrl || !imageUrl.startsWith('http')) imageUrl = testImageUrl;
+      let text = '';
 
-      let text = `[IMG:${imageUrl}]\n`;
+      // SÓ MANDA A FOTO SE ELA EXISTIR E FOR UM LINK VÁLIDO (http)
+      let imageUrl = '';
+      if ((product as any).imageUrl) {
+        imageUrl = String((product as any).imageUrl).trim();
+      }
+
+      if (imageUrl && imageUrl.startsWith('http')) {
+        text += `[IMG:${imageUrl}]\n`;
+      }
+
       text += `📦 *${product.name}*\n`;
       text += `💰 *R$ ${Number(product.price).toFixed(2)}*\n`;
       if (product.description) text += `📝 ${product.description}\n`;
@@ -342,7 +382,7 @@ export class ChatbotContext {
     const kit = await prisma.kit.findFirst({
       where: {
         isActive: true,
-        AND: condicoesAND // <-- Busca inteligente para os kits também
+        AND: condicoesAND
       },
       include: {
         items: {
@@ -352,12 +392,20 @@ export class ChatbotContext {
     });
 
     if (kit) {
+      let text = '';
+
+      // 👇 SÓ MANDA A FOTO SE O KIT TIVER UM LINK VÁLIDO
       let kitImageUrl = (kit as any).imageUrl;
-      if (!kitImageUrl || !kitImageUrl.startsWith('http')) kitImageUrl = testImageUrl;
+      if ((kit as any).imageUrl) {
+        kitImageUrl = String((kit as any).imageUrl).trim();
+      }
+
+      if (kitImageUrl && kitImageUrl.startsWith('http')) {
+        text += `[IMG:${kitImageUrl}]\n`;
+      }
 
       const itemsList = kit.items.map((i) => `${i.quantity}x ${i.product.name}`).join(', ');
 
-      let text = `[IMG:${kitImageUrl}]\n`;
       text += `🔥 *${kit.name}*\n`;
       text += `💰 *R$ ${Number(kit.finalPrice).toFixed(2)}*\n`;
       text += `📝 Composição: ${itemsList}\n`;
@@ -368,7 +416,6 @@ export class ChatbotContext {
     // 4. SE NÃO ACHOU EM NENHUM DOS DOIS
     return `O item "${nomeProduto}" não foi encontrado no estoque ou nas promoções ativas.`;
   }
-
   async excluirConversa(sessionKey: string): Promise<string> {
     try {
       const session = await prisma.chatSession.findUnique({

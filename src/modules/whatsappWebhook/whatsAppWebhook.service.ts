@@ -74,11 +74,11 @@ export class WhatsAppWebhookService {
             type: 'text',
             content: buttonId.startsWith('CONFIRM_YES:')
               ? `[PRODUTO_CONFIRMADO] ${buttonId.replace('CONFIRM_YES:', '')}`
-              : buttonId === 'CONFIRM_CHECKOUT'
-                ? '[FINALIZAR_PEDIDO] Cliente quer finalizar agora.'
-                : buttonId === 'VER_SUGESTAO'
-                  ? 'Sim, quero ver essa sugestão!' // 👈 Nova linha que mapeia o clique
-                  : 'Quero ver outras opções',
+              : buttonId.startsWith('CONFIRM_CHECKOUT')
+              ? '[FINALIZAR_PEDIDO] Cliente quer finalizar agora.'
+              : buttonId.startsWith('VER_SUGESTAO_') // 👉 NOVO AQUI
+                ? `[VER_SUGESTAO] ${buttonId.replace('VER_SUGESTAO_', '')}`
+                : 'Quero ver outras opções',
           },
         });
         return;

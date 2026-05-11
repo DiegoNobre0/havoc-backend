@@ -3,8 +3,13 @@ import { app } from './app.js';
 import { env } from './env/index.js';
 import { logger } from './shared/logger.js';
 import '../src/integrations/IA/chatbot.worker.js'; 
+import './shared/worker/payment.queue.js';
+import { setupSocket } from './shared/socket/socket.js';
 // Importa o worker do chatbot para que ele comece a processar os jobs da fila
 async function bootstrap() {
+
+  setupSocket(app.server)
+
   try {
     await app.listen({ port: env.PORT, host: '0.0.0.0' });
     logger.info(`Servidor rodando na porta ${env.PORT}`);

@@ -148,7 +148,6 @@ async sendInteractiveImageMessage(
 
     const formattedTo = this.formatPhoneNumber(to);
 
-    // Formata os botões para o padrão da Meta
     const safeButtons = buttons.map(btn => ({
       type: 'reply',
       reply: {
@@ -157,20 +156,16 @@ async sendInteractiveImageMessage(
       }
     }));
 
-    // Monta o payload interativo base
     const interactivePayload: any = {
       type: 'button',
       body: { text: bodyText.substring(0, 1024) },
       action: { buttons: safeButtons }
     };
 
-    // Se a imagem existir, acopla ela no CABEÇALHO (header) da mensagem
     if (imageUrl) {
       interactivePayload.header = {
         type: 'image',
-        image: {
-          link: imageUrl
-        }
+        image: { link: imageUrl }
       };
     }
 
@@ -193,8 +188,16 @@ async sendInteractiveImageMessage(
       if (!response.ok) {
         const err = await response.json();
         console.error('[WhatsApp Buttons Error]:', JSON.stringify(err, null, 2));
+        
+        // 🔥 O PULO DO GATO: FALLBACK AUTOMÁTICO 🔥
+        // Se der erro (ex: imagem 404 quebrada), ele engole o erro e tenta de novo SÓ COM TEXTO E BOTÕES
+        if (err.error?.message?.includes('Media upload error') || err.error?.code === 131053) {
+           console.log(`[WhatsApp Fallback] ⚠️ Imagem falhou. Reenviando apenas texto e botões para ${formattedTo}...`);
+           await this.sendInteractiveTextMessage(to, bodyText, buttons);
+        }
+
       } else {
-        console.log(`[WhatsApp] 🔘 Imagem + Texto + Botões enviados unificados para ${formattedTo}`);
+        console.log(`[WhatsApp] 🔘 Imagem + Botões enviados com sucesso para ${formattedTo}`);
       }
     } catch (error) {
       console.error('[WhatsApp HTTP Error]:', error);

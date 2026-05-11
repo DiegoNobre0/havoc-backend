@@ -18,6 +18,7 @@ import { catalogRoutes } from './modules/catalog/catalog.routes.js';
 import { whatsappWebhookRoutes } from './modules/whatsappWebhook/whatsAppWebhook.routes.js';
 import { chatbotRoutes } from './modules/chatbot/chatbot.routes.js';
 import { shippingRoutes } from './modules/shipping/shipping.routes.js';
+import { paymentsRoutes } from './modules/payments/payments.routes.js';
 
 export const app = fastify({
   loggerInstance: logger, 
@@ -86,3 +87,4 @@ app.register(catalogRoutes, { prefix: '/catalog' });
 app.register(whatsappWebhookRoutes, { prefix: '/webhook/whatsapp' });
 app.register(chatbotRoutes, { prefix: '/chatbot' })
 app.register(shippingRoutes, { prefix: '/shipping' });
+app.register(paymentsRoutes, { prefix: '/payments' });
