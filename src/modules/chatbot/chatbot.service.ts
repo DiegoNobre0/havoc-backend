@@ -15,7 +15,7 @@ export class ChatbotService {
   }
 
   // 1. Busca todas as sessões (com paginação e cache)
-  async findSessions(page: number, limit: number, search?: string) {
+  async findSessions(page: number, limit: number, search?: string, status?: string) {
     const cacheKey = `${this.CACHE_PREFIX}page:${page}:limit:${limit}:search:${search || 'all'}`;
     const cached = await redis.get(cacheKey);
     if (cached) return JSON.parse(cached);
@@ -26,6 +26,10 @@ export class ChatbotService {
     // Se houver busca, procura pelo número de telefone (sessionKey)
     if (search) {
       where.sessionKey = { contains: search };
+    }
+
+    if (status) {
+      where.status = status; 
     }
 
     const [total, sessions] = await Promise.all([
@@ -125,5 +129,61 @@ export class ChatbotService {
       where: { id: config.id },
       data,
     });
+  }
+  async updateSessionStatusById(id: string, status: any) {
+    const session = await prisma.chatSession.update({
+      where: { id },
+      data: { status }
+    });
+
+    await this.clearCache();
+    return session;
+  }
+
+  // Atualiza a Tag/Status da Sessão
+  async updateSessionStatus(sessionKey: string, status: 'NOVO_ATENDIMENTO' | 'EM_ANDAMENTO' | 'AGUARDANDO_PAGAMENTO' | 'ATENDIMENTO_HUMANO' | 'FINALIZADO' | 'CANCELADO') {
+    const session = await prisma.chatSession.update({
+      where: { sessionKey },
+      data: { status }
+    });
+
+    await this.clearCache();
+    return session;
+  }
+
+  // 👉 NOVO: Método específico para enviar mídias (Fotos, Áudios, Docs)
+  async sendMediaMessage(sessionId: string, mediaUrl: string, mimeType: string, fileName: string) {
+    const session = await prisma.chatSession.findUnique({ where: { id: sessionId } });
+    if (!session) throw new Error('Sessão não encontrada');
+
+    let contentFormatado = '';
+
+    // 1. Identifica o tipo e dispara via WhatsApp Cloud API
+    if (mimeType.startsWith('image/')) {
+      await this.whatsapp.sendImageMessage(session.sessionKey, mediaUrl);
+      contentFormatado = `[IMG:${mediaUrl}]`;
+    } 
+    else if (mimeType.startsWith('audio/')) {
+      // ⚠️ Certifique-se de ter o método sendAudioMessage no seu WhatsAppIntegrationService
+      await this.whatsapp.sendAudioMessage(session.sessionKey, mediaUrl); 
+      contentFormatado = `[AUDIO:${mediaUrl}]`;
+    } 
+    else {
+      // ⚠️ Certifique-se de ter o método sendDocumentMessage no seu WhatsAppIntegrationService
+      await this.whatsapp.sendDocumentMessage(session.sessionKey, mediaUrl, fileName);
+      contentFormatado = `[DOC:${mediaUrl}] ${fileName}`;
+    }
+
+    // 2. Salva no banco com a Tag Mágica para o Frontend ler depois
+    const newMessage = await prisma.chatMessage.create({
+      data: {
+        sessionId,
+        role: 'ASSISTANT',
+        content: contentFormatado
+      }
+    });
+
+    await this.clearCache();
+    return newMessage;
   }
 }

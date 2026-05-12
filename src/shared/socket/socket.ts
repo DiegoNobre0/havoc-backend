@@ -23,6 +23,10 @@ export function setupSocket(server: any) {
       console.log(`[Socket.io] 🎧 Painel escutando o chat do número: ${sessionKey}`);
     });
 
+    socket.on('leave_chat', (sessionKey: string) => {
+      socket.leave(`chat_${sessionKey}`);
+    });
+
     socket.on('join_chat_list', () => {
       socket.join('all_chats'); 
     });

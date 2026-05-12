@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { redis } from '../../shared/redis/redis.js';
+import { ChatbotService } from '../../modules/chatbot/chatbot.service.js';
 
 // Inicializa a OpenAI com a chave do .env
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -19,6 +20,7 @@ export class IAService {
   // Vamos usar o gpt-4o-mini: é incrivelmente inteligente, rápido e muito barato
   private model = 'gpt-4o-mini';
   private contextHelper = new ChatbotContext();
+  private chatbotService = new ChatbotService();
 
   // ─── Executa qualquer tool pelo nome e argumentos ───
   private async executeTool(
@@ -32,14 +34,19 @@ export class IAService {
 
     try {
       if (name === 'listar_produtos') {
+
+        await this.chatbotService.updateSessionStatus(sessionKey, 'EM_ANDAMENTO');
+
         const resultText = await this.contextHelper.listarProdutos(args.termo_busca);
 
         const nomesEncontrados: string[] = [];
+
         const linhas = resultText.split('\n');
         linhas.forEach(linha => {
-          const match = linha.match(/^\*(\d+)\.\s(.+)\*$/);
+          // Regex flexível: Pega o número e o nome do produto, ignorando marcações
+          const match = linha.match(/\*?(\d+)\.\s+([^\*]+)/);
           if (match) nomesEncontrados.push(match[2].trim());
-        });
+        })
 
         if (nomesEncontrados.length > 0) {
           await (redis as any).set(
@@ -49,9 +56,11 @@ export class IAService {
           );
         }
 
-        result = resultText + '\n\n⚠️ [INSTRUÇÃO DO SISTEMA]: Você DEVE repassar EXATAMENTE E APENAS os produtos listados acima. É ESTRITAMENTE PROIBIDO inventar, adicionar itens extras ou alterar preços. Se o sistema retornou apenas 1 opção, apresente APENAS 1 opção. NUNCA crie produtos da sua cabeça para "encher" a lista.';
+        result = resultText + '\n\n⚠️ [INSTRUÇÃO DO SISTEMA]: Apresente os resultados de forma natural e animada. Se o cliente acabou de enviar uma foto ou for o primeiro contato, inicie a mensagem com uma saudação amigável (Bom dia/Boa tarde). ⚠️ REGRA ABSOLUTA: Repasse os produtos listados acima EXATAMENTE como estão. É ESTRITAMENTE PROIBIDO inventar itens ou alterar preços.. Se o sistema retornou apenas 1 opção, apresente APENAS 1 opção. NUNCA crie produtos da sua cabeça para "encher" a lista.';
       } else if (name === 'ver_detalhes_do_produto') {
         const rawResult = await this.contextHelper.verDetalhesProduto(args.nome_produto);
+
+         await this.chatbotService.updateSessionStatus(sessionKey, 'EM_ANDAMENTO');
 
         // Se não encontrou o produto, avisa a IA e proíbe ela de tentar vender o fantasma
         if (rawResult.includes('não foi encontrado')) {
@@ -80,6 +89,8 @@ export class IAService {
       } else if (name === 'gerar_resumo_e_checkout') {
         const rawResult = await this.contextHelper.gerarCheckout(sessionKey, args);
 
+        await this.chatbotService.updateSessionStatus(sessionKey, 'AGUARDANDO_PAGAMENTO');
+
         // 1. Salva a Imagem do QR Code
         const imgMatch = rawResult.match(/\[IMG:(.*?)\]/);
         if (imgMatch) extractedTags += `[IMG:${imgMatch[1]}]\n`;
@@ -94,13 +105,23 @@ export class IAService {
         result = `${cleanResult}\n\n⚠️ INSTRUÇÃO DO SISTEMA: Repasse o texto do resumo da compra EXATAMENTE como está.`;
 
       } else if (name === 'solicitar_atendimento_humano') {
+        await this.chatbotService.updateSessionStatus(sessionKey, 'ATENDIMENTO_HUMANO');
         handoff = true;
         result = 'Ação concluída. Humano notificado.';
 
       }
       else if (name === 'listar_kits_promocionais') {
         const resultText = await this.contextHelper.getPromoKitsContext();
+        await this.chatbotService.updateSessionStatus(sessionKey, 'EM_ANDAMENTO');
         result = resultText + '\n\n⚠️ [INSTRUÇÃO DO SISTEMA]: Copie e apresente os kits promocionais acima para o cliente com muita energia. NUNCA invente combos. Após mostrar, pergunte qual combo ele quer garantir!';
+      }
+      else if (name === 'remover_item_carrinho') {
+        result = await this.contextHelper.removerProdutoDoCarrinho(args.session, args.nome_produto);
+      } 
+      else if (name === 'cancelar_pedido_e_sessao') {
+        result = await this.contextHelper.cancelarAtendimento(sessionKey);
+        // Aqui podemos resetar o carrinho no Redis também
+        args.session.carrinho = [];
       }
       else {
         result = `Ferramenta "${name}" não reconhecida.`;
@@ -135,6 +156,7 @@ export class IAService {
   }
 
   // ─── Analisa imagem via GPT-4o-mini Vision ───
+  // ─── Analisa imagem via GPT-4o-mini Vision ───
   async analyzeImage(base64Image: string): Promise<string> {
     try {
       const response = await openai.chat.completions.create({
@@ -145,7 +167,12 @@ export class IAService {
             content: [
               {
                 type: 'text',
-                text: "Você é um extrator de dados. Olhe para a imagem e retorne APENAS o nome do produto ou do combo/kit em até 5 palavras. Não adicione descrições, preços, benefícios ou saudações. Exemplo de saída: 'Whey 100% HD Black Skull' ou 'Kit Creatina Black Skull'."
+                text: `Você é um especialista em suplementos trabalhando em uma loja no Brasil. Olhe para a imagem do produto e retorne APENAS o seu nome comercial principal e a marca.
+⚠️ REGRAS OBRIGATÓRIAS:
+1. IGNORE completamente textos genéricos de embalagem, pesos e avisos (como 'powder', 'dietary supplement', 'net wt', 'flavor', 'advanced formula').
+2. TRADUZA a categoria do produto para o padrão brasileiro (Exemplo: se ler 'Pre-Workout', escreva 'Pre Treino'. Se ler 'Fat Burner', escreva 'Termogenico').
+3. Retorne uma string limpa de no máximo 4 a 5 palavras para ser usada em um banco de dados relacional.
+Exemplo de saída perfeita: 'Nuclear Rush Pre Treino Body Action' ou 'Kit Creatina Black Skull'.`
               },
               {
                 type: 'image_url',
@@ -154,7 +181,7 @@ export class IAService {
             ]
           }
         ],
-        temperature: 0.2,
+        temperature: 0.1, // Temperatura bem baixa para ele não alucinar e ser preciso
       });
       return response.choices[0].message.content || 'Imagem não reconhecida.';
     } catch (error) {
@@ -194,11 +221,22 @@ Sua personalidade: Jovem, atlética, extremamente simpática, com alta energia e
 1. Limite de texto: Máximo de 3 a 4 linhas curtas por mensagem. Seja direta.
 2. Formatação: Use emojis com bom senso. Para negrito, use apenas UM asterisco de cada lado (ex: *Whey Protein*). NUNCA use duplos (**).
 3. Anti-Alucinação: Você NÃO tem permissão para inventar preços, produtos, fretes ou estoques. Se não tem no sistema, não existe.
-4. O FUNIL É SUA BÍBLIA: Você NUNCA oferece um produto sem antes saber o Objetivo (Etapa 1) e a Experiência (Etapa 2).
+4. O FUNIL É SUA BÍBLIA (COM EXCEÇÕES): Siga as Etapas 1 e 2 APENAS para clientes indecisos.
+
+🚀 A VIA EXPRESSA (CLIENTE DECIDIDO E FOTOS):
+- Se o cliente já chegar pedindo um produto específico (ex: "tem creatina?", "quero o whey x") OU enviar uma FOTO de um produto/kit:
+- ⚠️ PULE AS ETAPAS 1 E 2 IMEDIATAMENTE! Ele já sabe o que quer. Não faça perguntas sobre objetivos.
+- Ação Imediata: Agradeça a foto/pedido e chame a ferramenta 'listar_produtos', 'listar_kits_promocionais' ou 'ver_detalhes_do_produto' AGORA MESMO usando o que o sistema de Visão identificou.
 
 🛑 PROTOCOLOS DE SAÚDE E RESTRIÇÃO (VERIFICAÇÃO OBRIGATÓRIA):
-- PROTOCOLO TERMOGÊNICO: Se o cliente pedir ou você for indicar termogênico, ANTES de listar, pergunte: "Você tem pressão alta, insônia ou ansiedade?". (Se Sim -> Indique apenas L-Carnitina / Se Não -> Termogênico normal).
-- PROTOCOLO LACTOSE: Se o cliente citar intolerância à lactose, indique APENAS Proteína Isolada ou Beef Protein. NUNCA indique Whey Concentrado.
+- PROTOCOLO TERMOGÊNICO: Se o cliente pedir termogênico, queimador ou emagrecedor, ANTES de listar, pergunte: "Para eu te indicar a melhor opção, você tem pressão alta, insônia ou ansiedade?". (PARE E AGUARDE A RESPOSTA).
+  > Se ele responder que SIM (tem problemas): Chame a ferramenta 'listar_produtos' buscando APENAS por "L-Carnitina".
+  > Se ele responder que NÃO (tudo ok): Chame a ferramenta 'listar_produtos' buscando por "Emagrecimento". NUNCA invente nomes como "Termogênico A".
+- PROTOCOLO LACTOSE: Se o cliente citar intolerância à lactose, chame a ferramenta 'listar_produtos' buscando por Proteína Isolada ou Beef Protein. NUNCA indique Whey Concentrado.
+
+🛑 GESTÃO DE ERROS E DESISTÊNCIA:
+- Se o cliente disser "tira o whey", "errei o produto" ou "não quero mais a creatina": Chame 'remover_item_carrinho'.
+- Se o cliente disser "cancela tudo", "desisto" ou "não vou comprar mais": Chame 'cancelar_pedido_e_sessao'. Seja educada e diga que as portas estão abertas.
 
 🚀 ATALHO MULTIMODAL E KITS:
 - Imagem: Se o sistema avisar que o cliente enviou uma foto, agradeça a foto, mas SEGURE A VENDA. Faça as Etapas 1 e 2 antes de dar os detalhes do produto da foto.
@@ -207,8 +245,8 @@ Sua personalidade: Jovem, atlética, extremamente simpática, com alta energia e
 ---
 🎯 FUNIL DE VENDAS HAVOC (SIGA A ORDEM EXATA):
 
-ETAPA 1 — DESCOBERTA DO OBJETIVO:
-Mesmo que o cliente já chegue pedindo um produto (Ex: "Quero um whey da growth"), valide o pedido e puxe a pergunta do objetivo.
+ETAPA 1 — DESCOBERTA DO OBJETIVO (Só para clientes indecisos):
+Se o cliente chegar dizendo apenas "oi", "bom dia" ou "quero suplemento" (sem especificar qual), puxe a pergunta do objetivo.
 - Como fazer: "Para eu te direcionar a melhor opção, seu foco principal hoje é ganho de massa, emagrecimento ou mais energia pro treino?" (PARE AQUI).
 
 ETAPA 2 — NÍVEL DE EXPERIÊNCIA:
@@ -217,7 +255,7 @@ Assim que ele responder o objetivo, descubra o nível dele.
 
 ETAPA 3 — APRESENTAÇÃO (PROTOCOLOS ESPECÍFICOS):
 Agora sim você mostra os produtos, dependendo da resposta da Etapa 2:
-- PROTOCOLO EXPERIENTE (já usa): "Massa! Você tem preferência por alguma marca (tipo Black Skull, Dux) ou quer que eu te mostre nossos campeões de venda?" -> Após ele responder, chame a ferramenta 'listar_produtos'.
+- PROTOCOLO EXPERIENTE (já usa): "Massa! Você tem preferência por alguma marca (tipo Black Skull, Dux) ou quer que eu te mostre nossas opções?" -> Após ele responder, chame a ferramenta 'listar_produtos'.
 - PROTOCOLO INICIANTE (vai começar): Diga APENAS: "Para começar certo, o ideal é: 💪 Whey, ⚡ Creatina e 🔄 BCAA. Posso te mostrar as opções?" -> Se ele responder "Sim", chame 'listar_produtos' APENAS para o produto principal que ele pediu lá no início (ex: "whey").
 
 ETAPA 4 — DETALHES E BOTÕES (Gatilho de Compra):
@@ -253,11 +291,30 @@ Siga este fluxo EXATAMENTE nesta ordem de Passos:
 
     // ─── 3. Constrói as Ferramentas (Tools) ───
     const tools: OpenAI.Chat.ChatCompletionTool[] = [
+      // {
+      //   type: 'function',
+      //   function: {
+      //     name: 'listar_produtos',
+      //     description: 'Busca produtos no banco de dados. ⚠️ REGRA DE OURO: Use SEMPRE que precisar listar opções na ETAPA 3 (Apresentação) ou na ETAPA 5 (Upsell). OBRIGATÓRIO: Converta o pedido do cliente para palavras-chave em inglês ANTES de buscar (ex: "proteína" -> "protein" ou "whey", "creatina" -> "creatin"). 🛑 NUNCA invente produtos da sua cabeça, use SEMPRE o retorno desta ferramenta.',
+      //     parameters: {
+      //       type: 'object',
+      //       properties: { termo_busca: { type: 'string' } },
+      //       required: ['termo_busca'],
+      //     },
+      //   },
+      // },
       {
         type: 'function',
         function: {
           name: 'listar_produtos',
-          description: 'Busca produtos no banco de dados. ⚠️ REGRA DE OURO: Use SEMPRE que precisar listar opções na ETAPA 3 (Apresentação) ou na ETAPA 5 (Upsell). OBRIGATÓRIO: Converta o pedido do cliente para palavras-chave em inglês ANTES de buscar (ex: "proteína" -> "protein" ou "whey", "creatina" -> "creatin"). 🛑 NUNCA invente produtos da sua cabeça, use SEMPRE o retorno desta ferramenta.',
+          description: `Busca produtos e acessórios no banco de dados. 
+⚠️ REGRA DE OURO DA BUSCA: Antes de pesquisar, interprete o que o cliente quer e TRADUZA para a categoria/palavra-chave correta do nosso banco de dados.
+- Se pedir "proteína", "pra crescer", "massa magra" -> busque 'whey' ou 'protein'.
+- Se pedir "secar", "emagrecer", "termogênico", "fat burner" -> busque 'emagrecimento'.
+- Se pedir "energia", "pump", "pre workout" -> busque 'treino'.
+- Se pedir "ganhar peso", "massa" -> busque 'hipercalorico'.
+- Se pedir acessórios (coqueteleira, luva, strap, garrafa) -> busque pelo nome exato do item.
+Passe APENAS a palavra-chave limpa (ex: "emagrecimento", "whey", "coqueteleira"). NUNCA invente produtos, use sempre o retorno desta ferramenta.`,
           parameters: {
             type: 'object',
             properties: { termo_busca: { type: 'string' } },
@@ -303,6 +360,28 @@ Siga este fluxo EXATAMENTE nesta ordem de Passos:
             properties: { cep_ou_endereco: { type: 'string' } },
             required: ['cep_ou_endereco'],
           },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'remover_item_carrinho',
+          description: 'Remove um produto específico do carrinho de compras do cliente.',
+          parameters: {
+            type: 'object',
+            properties: {
+              nome_produto: { type: 'string', description: 'O nome do produto a remover' }
+            },
+            required: ['nome_produto'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'cancelar_pedido_e_sessao',
+          description: 'Cancela o pedido atual e limpa o carrinho caso o cliente desista da compra.',
+          parameters: { type: 'object', properties: {} },
         },
       },
       {

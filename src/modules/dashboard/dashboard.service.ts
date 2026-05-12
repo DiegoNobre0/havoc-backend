@@ -6,28 +6,21 @@ import { prisma } from '../../database/prisma.js';
 export class DashboardService {
   private readonly CACHE_TTL = 300; // 5 minutos de cache (300 segundos)
 
-  // ==========================================
+// ==========================================
   // 1. RESUMO GERAL (KPIs)
   // ==========================================
   async getSummary() {
     const cacheKey = 'dashboard:summary:today';
     const cached = await redis.get(cacheKey);
     
-    if (cached) {
-      return JSON.parse(cached);
-    }
+    if (cached) return JSON.parse(cached);
 
     const todayStart = dayjs().startOf('day').toDate();
     const todayEnd = dayjs().endOf('day').toDate();
 
-    // Executa as consultas em paralelo para máxima performance
-    const [ordersToday, revenueToday, pendingOrders] = await Promise.all([
-      // Total de Pedidos Hoje
-      prisma.order.count({
-        where: { createdAt: { gte: todayStart, lte: todayEnd } }
-      }),
+    const [ordersToday, revenueToday, pendingOrders, newCustomers] = await Promise.all([
+      prisma.order.count({ where: { createdAt: { gte: todayStart, lte: todayEnd } } }),
       
-      // Receita Hoje (Apenas pedidos Confirmados/Enviados/Entregues)
       prisma.order.aggregate({
         _sum: { total: true },
         where: {
@@ -36,24 +29,58 @@ export class DashboardService {
         }
       }),
 
-      // Pedidos Pendentes (Para o alerta visual)
-      prisma.order.count({
-        where: { status: 'PENDING' }
-      })
+      prisma.order.count({ where: { status: 'PENDING' } }),
+
+      // 👉 NOVO: Conta clientes criados hoje
+      prisma.user.count({ where: { createdAt: { gte: todayStart, lte: todayEnd }, role: 'VISUALIZADOR' } }) 
     ]);
 
     const result = {
       ordersToday,
       revenueToday: Number(revenueToday._sum.total || 0),
-      pendingOrders
+      pendingOrders,
+      newCustomers // 👉 NOVO
     };
 
-    // Salva no Redis por 5 minutos
     await redis.set(cacheKey, JSON.stringify(result), 'EX', this.CACHE_TTL);
-
     return result;
   }
 
+  // ==========================================
+  // 4. TOP PRODUTOS VENDIDOS
+  // ==========================================
+  async getTopProducts(limit = 5) {
+    const cacheKey = `dashboard:top-products:${limit}`;
+    const cached = await redis.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+
+    // Agrupa os itens de pedido pelo productId e soma as quantidades e valores
+    const topItems = await prisma.orderItem.groupBy({
+      by: ['productId'],
+      _sum: { quantity: true, totalPrice: true },
+      orderBy: { _sum: { quantity: 'desc' } },
+      where: { productId: { not: null } }, // Ignora itens que eram só de kits se houver
+      take: limit
+    });
+
+    // Busca os nomes e categorias desses produtos
+    const result = await Promise.all(topItems.map(async (item) => {
+      const product = await prisma.product.findUnique({
+        where: { id: item.productId! },
+        include: { categories: { select: { name: true } } }
+      });
+
+      return {
+        nome: product?.name || 'Produto Excluído',
+        categoria: product?.categories[0]?.name || 'Sem Categoria',
+        qtd: item._sum.quantity || 0,
+        valor: Number(item._sum.totalPrice || 0)
+      };
+    }));
+
+    await redis.set(cacheKey, JSON.stringify(result), 'EX', this.CACHE_TTL);
+    return result;
+  }
   // ==========================================
   // 2. RELATÓRIO DE VENDAS (Gráficos)
   // ==========================================

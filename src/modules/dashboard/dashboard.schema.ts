@@ -6,6 +6,10 @@ export const dashboardQuerySchema = z.object({
   endDate: z.string().datetime().optional(),
 });
 
+export const topProductsQuerySchema = z.object({
+  limit: z.coerce.number().min(1).max(50).default(5),
+});
+
 export const paginationQuerySchema = z.object({
   page: z.coerce.number().min(1).default(1),
   limit: z.coerce.number().min(1).max(10000).default(10),
@@ -14,3 +18,4 @@ export const paginationQuerySchema = z.object({
 
 export type DashboardQuery = z.infer<typeof dashboardQuerySchema>;
 export type PaginationQuery = z.infer<typeof paginationQuerySchema>;
+export type TopProductsQuery = z.infer<typeof topProductsQuerySchema>;

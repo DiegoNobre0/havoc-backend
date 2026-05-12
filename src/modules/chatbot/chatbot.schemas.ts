@@ -4,10 +4,20 @@ export const idParamSchema = z.object({
   id: z.string().uuid()
 });
 
+const chatSessionStatusEnum = z.enum([
+  'NOVO_ATENDIMENTO',
+  'EM_ANDAMENTO',
+  'AGUARDANDO_PAGAMENTO',
+  'ATENDIMENTO_HUMANO',
+  'FINALIZADO',
+  'CANCELADO'
+]);
+
 export const sessionQuerySchema = z.object({
   page: z.coerce.number().min(1).default(1),
   limit: z.coerce.number().min(1).max(100).default(20),
-  search: z.string().optional()
+  search: z.string().optional(),
+  status: chatSessionStatusEnum.optional()
 });
 
 export const sendMessageSchema = z.object({
@@ -16,6 +26,10 @@ export const sendMessageSchema = z.object({
 
 export const toggleStatusSchema = z.object({
   isActive: z.boolean()
+});
+
+export const updateSessionStatusSchema = z.object({
+  status: chatSessionStatusEnum
 });
 
 export const updateConfigBodySchema = z.object({

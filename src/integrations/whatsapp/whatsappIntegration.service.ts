@@ -244,4 +244,91 @@ async sendInteractiveImageMessage(
       console.error(err);
     }
   }
+
+
+  // ==========================================
+  // 👉 ENVIAR ÁUDIO
+  // ==========================================
+  async sendAudioMessage(to: string, audioUrl: string) {
+    if (!this.token || !this.phoneId) return;
+
+    const formattedTo = this.formatPhoneNumber(to);
+
+    // Verifica se a URL é válida para a web
+    if (!audioUrl || !audioUrl.startsWith('http')) {
+      console.warn(`[WhatsApp] ⚠️ URL de áudio inválida (${audioUrl}).`);
+      return;
+    }
+
+    try {
+      const response = await fetch(this.apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: formattedTo,
+          type: 'audio',
+          audio: {
+            link: audioUrl
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error(`[WhatsApp Audio Error]:`, JSON.stringify(errorData, null, 2));
+      } else {
+        console.log(`[WhatsApp] 🎙️ Áudio enviado com sucesso para ${formattedTo}`);
+      }
+    } catch (error) {
+      console.error('[WhatsApp HTTP Error]:', error);
+    }
+  }
+
+  // ==========================================
+  // 👉 ENVIAR DOCUMENTO (PDFs, Arquivos)
+  // ==========================================
+  async sendDocumentMessage(to: string, documentUrl: string, fileName: string) {
+    if (!this.token || !this.phoneId) return;
+
+    const formattedTo = this.formatPhoneNumber(to);
+
+    if (!documentUrl || !documentUrl.startsWith('http')) {
+      console.warn(`[WhatsApp] ⚠️ URL de documento inválida (${documentUrl}).`);
+      return;
+    }
+
+    try {
+      const response = await fetch(this.apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: formattedTo,
+          type: 'document',
+          document: {
+            link: documentUrl,
+            filename: fileName || 'documento' // Fallback caso não venha nome
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error(`[WhatsApp Document Error]:`, JSON.stringify(errorData, null, 2));
+      } else {
+        console.log(`[WhatsApp] 📄 Documento enviado com sucesso para ${formattedTo}`);
+      }
+    } catch (error) {
+      console.error('[WhatsApp HTTP Error]:', error);
+    }
+  }
 }

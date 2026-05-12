@@ -1,6 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { DashboardService } from './dashboard.service.js';
-import { DashboardQuery, PaginationQuery } from './dashboard.schema.js';
+import { DashboardQuery, PaginationQuery, TopProductsQuery } from './dashboard.schema.js';
 
 
 export class DashboardController {
@@ -26,6 +26,14 @@ export class DashboardController {
     const dashboardService = new DashboardService();
     
     const data = await dashboardService.getRecentOrders(page, limit, status);
+    return reply.status(200).send(data);
+  }
+
+  async topProducts(request: FastifyRequest<{ Querystring: TopProductsQuery }>, reply: FastifyReply) {
+    const { limit } = request.query;
+    const dashboardService = new DashboardService();
+    
+    const data = await dashboardService.getTopProducts(limit);
     return reply.status(200).send(data);
   }
 }

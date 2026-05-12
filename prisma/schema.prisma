@@ -50,6 +50,15 @@ enum ChatMessageRole {
   ASSISTANT
 }
 
+enum ChatSessionStatus {
+  NOVO_ATENDIMENTO
+  EM_ANDAMENTO
+  AGUARDANDO_PAGAMENTO
+  ATENDIMENTO_HUMANO
+  FINALIZADO
+  CANCELADO
+}
+
 enum ShippingType {
   BY_CEP
   BY_REGION
@@ -268,7 +277,8 @@ model Payment {
 model ChatSession {
   id                 String    @id @default(uuid())
   sessionKey         String    @unique @default(uuid())
-  isActive           Boolean   @default(true)
+  isActive           Boolean   @default(false)
+  status             ChatSessionStatus @default(NOVO_ATENDIMENTO)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
   handoffRequestedAt DateTime?

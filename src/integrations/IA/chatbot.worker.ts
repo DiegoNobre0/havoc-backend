@@ -93,7 +93,11 @@ export const chatbotWorker = new Worker(
         const buf = await whatsapp.downloadMedia(message.content);
         if (buf) {
           const descricao = await iaService.analyzeImage(buf.toString('base64'));
-          textoFinal = `[Cliente enviou imagem. Visão identificou: "${descricao}"]. Carol, atenda com base nisso.`;
+          textoFinal = `[FOTO RECEBIDA] 
+Visão identificou: "${descricao}". 
+⚠️ INSTRUÇÃO DO SISTEMA: O cliente quer ESSE item da foto. Ative a VIA EXPRESSA! 
+1. Inicie a frase sendo educada, dê um "Bom dia/Boa tarde" com energia e confirme que foi procurar o item da foto.
+2. Pule as etapas Iniciais e chame as ferramentas de busca (listar_produtos ou listar_kits_promocionais) AGORA buscando por "${descricao}".`;
         } else {
           textoFinal = '[O cliente enviou uma imagem, mas falhou ao carregar]';
         }
@@ -128,6 +132,10 @@ export const chatbotWorker = new Worker(
 O cliente escolheu o item ${textoFinal} da lista, que corresponde a "${nomeProduto}".
 ⚠️ INSTRUÇÃO DO SISTEMA: Chame IMEDIATAMENTE a ferramenta 'ver_detalhes_do_produto' passando EXATAMENTE "${nomeProduto}".`;
           }
+        } else {
+          // 👉 FALLBACK NOVO: Se o Redis sumiu, obriga a IA a olhar o contexto e chamar a tool
+          textoFinal = `O cliente digitou a opção número "${textoFinal}".
+⚠️ INSTRUÇÃO DO SISTEMA: Chame a ferramenta 'ver_detalhes_do_produto' AGORA passando o NOME COMPLETO do item ${textoFinal} que você listou na sua última mensagem. NÃO repasse a descrição da sua memória.`;
         }
       }
 
@@ -214,10 +222,11 @@ Carrinho atual: ${carrinhoTexto}.
         // Atualiza a tela de quem está com a conversa aberta
         io.to(`chat_${sKey}`).emit('new_message', { role: 'USER', content: textoFinal });
         // Atualiza a lista geral
-        io.to('all_chats').emit('chat_updated', { sessionKey: sKey, lastMessage: textoFinal });
+        io.to('all_chats').emit('chat_updated', { sessionKey: sKey, lastMessage: textoFinal, role: 'USER' });
       }
 
       const aiResponse = await iaService.generateResponse(session, textoFinal, history);
+      await saveSession(sKey, session); 
 
       // ── Handoff ──────────────────────────────────────────────
       if (aiResponse.handoff) {
@@ -263,13 +272,16 @@ Carrinho atual: ${carrinhoTexto}.
         // 2. Mudamos o fallback para vazio '' (MUITO IMPORTANTE)
         const produtoSugerido = sugestaoMatch ? sugestaoMatch[1].trim() : '';
 
+        const pixMatch = aiResponse.content.match(/\[PIX:(.*?)\]/i);
+        const pixCode = pixMatch ? pixMatch[1].trim() : null;
+
         console.log(`[DEBUG TAG] Produto Sugerido Extraído: "${produtoSugerido}"`);
 
         let finalContent = aiResponse.content
           .replace(imgRegex, '')
           .replace(confirmTagParaLimpar, '')
           .replace(toolTagRegex, '')
-          .replace(/\[SUGESTAO:(.*?)\]/gi, '') 
+          .replace(/\[SUGESTAO:(.*?)\]/gi, '')
           .replace(/\[PIX:(.*?)\]/gi, '')
           .trim();
 
@@ -281,7 +293,7 @@ Carrinho atual: ${carrinhoTexto}.
           await pushHistory(sKey, 'ASSISTANT', finalContent);
           if (io) {
             io.to(`chat_${sKey}`).emit('new_message', { role: 'ASSISTANT', content: finalContent });
-            io.to('all_chats').emit('chat_updated', { sessionKey: sKey, lastMessage: finalContent });
+            io.to('all_chats').emit('chat_updated', { sessionKey: sKey, lastMessage: finalContent , role: 'ASSISTANT'});
           }
         }
 
@@ -294,7 +306,8 @@ Carrinho atual: ${carrinhoTexto}.
           prisma.chatMessage.createMany({
             data: [
               { sessionId: dbSession.id, role: 'USER', content: textoParaHistorico },
-              { sessionId: dbSession.id, role: 'ASSISTANT', content: finalContent, tokens: aiResponse.tokens },
+              // Salva a resposta original (com tags) para o painel conseguir renderizar!
+              { sessionId: dbSession.id, role: 'ASSISTANT', content: aiResponse.content || '', tokens: aiResponse.tokens }
             ],
           })
         ).catch((e) => console.error('[Prisma Background Error]:', e));
@@ -335,7 +348,11 @@ Carrinho atual: ${carrinhoTexto}.
           if (finalContent) {
             await whatsapp.sendTextMessage(sKey, finalContent);
           }
-          
+          if (pixCode) {
+            await whatsapp.sendTextMessage(sKey, pixCode);
+            console.log(`[WhatsApp] 💸 Código PIX enviado separado para ${sKey}`);
+          }
+
         }
         console.log(`[WhatsApp] ✅ Resposta enviada para ${sKey}`);
       }

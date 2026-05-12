@@ -98,7 +98,7 @@ export class ChatbotContext {
           { categories: { some: { name: { contains: termoBusca, mode: 'insensitive' } } } }
         ]
       },
-      take: 4, // Traz no máximo 4 opções para não poluir o WhatsApp do cliente
+      take: 10, // Traz no máximo 4 opções para não poluir o WhatsApp do cliente
       select: {
         id: true,
         name: true,
@@ -124,8 +124,7 @@ export class ChatbotContext {
         text += `[IMG:${(p as any).imageUrl}]\n`;
       }
       text += `📦 *${p.name}*\n`;
-      text += `💰 Valor: R$ ${Number(p.price).toFixed(2)}\n`;
-      if (p.description) text += `📝 ${p.description}\n`;
+      text += `💰 Valor: R$ ${Number(p.price).toFixed(2)}\n`;      
       text += `\n`;
     }
 
@@ -280,55 +279,84 @@ export class ChatbotContext {
   }
 
   async listarProdutos(termoBusca: string): Promise<string> {
+    // 1. Limpeza inteligente e Tradução Universal de Suplementos
 
-    // 1. Remove acentos, converte para minúsculas e troca português por inglês
     let termoLimpo = termoBusca
-      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .replace(/creatina|creatine/g, 'creatin') // Transforma tanto A quanto E na raiz 'creatin'
-      .replace(/proteina/g, 'protein');
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Tira acentos
+      .toLowerCase();
+    // let termoLimpo = termoBusca
+    //   .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Tira os acentos
+    //   .toLowerCase()
+    //   // A. Proteínas
+    //   .replace(/proteina|protein/g, 'whey')
+    //   .replace(/beef|carne/g, 'beef')
+    //   // B. Força e Recuperação
+    //   .replace(/creatina|creatine/g, 'creatin')
+    //   .replace(/glutamina|glutamine/g, 'glutamin')
+    //   // C. Energia e Pré-Treino
+    //   .replace(/pre[- ]?workout/g, 'treino')
+    //   .replace(/pre[- ]?treino/g, 'treino')
+    //   .replace(/vasodilatador|pump/g, 'treino') // Se pedir pump/vasodilatador, sugere pré-treino
+    //   // D. Emagrecimento
+    //   .replace(/termogenico|queimador|fat[- ]?burner|emagrecedor|secar|lipo/g, 'emagrecimento')
+    //   // E. Ganho de Peso / Hipercalórico
+    //   .replace(/hipercalorico|mass[- ]?gainer|massa/g, 'hipercalorico') 
+    //   // F. Vitaminas e Saúde
+    //   .replace(/multivitaminico|vitaminas|poli/g, 'vitamin')
+    //   .replace(/omega[- ]?3|oleo de peixe/g, 'omega')
+    //   .replace(/melatonina|sono|dormir/g, 'melatonina')
+    //   // G. Combos
+    //   .replace(/combo|pacote/g, 'kit');
 
+    // Dicionário de palavras inúteis expandido com termos de embalagens em inglês
+    const palavrasInuteis = [
+      'preciso', 'quero', 'de', 'um', 'uma', 'gostaria', 'comprar', 'busco', 'ver', 'tem', 'sugestao',
+      'promocao', 'promo', 'unidades', 'unidade', 'pack', 'com', 'x', 'para', 'o', 'a', 'e',
+      'powder', 'dietary', 'supplement', 'suplemento', 'flavor', 'sabor', 'nutrition', 'advanced', 'formula'
+    ];
 
-    // 2. Remove palavras inúteis da frase (Adicionei "sugestao" para limpar cliques de botões)
-    const palavrasInuteis = ['preciso', 'quero', 'de', 'um', 'uma', 'gostaria', 'comprar', 'busco', 'ver', 'tem', 'sugestao'];
-
-    // 3. Quebra a busca e filtra
-    const termos = termoLimpo.split(' ').filter(t => t.trim().length > 1 && !palavrasInuteis.includes(t));
+    // Filtra palavras inúteis e números isolados
+    const termos = termoLimpo.split(' ').filter(t => t.trim().length > 1 && !palavrasInuteis.includes(t) && isNaN(Number(t)));
 
     if (termos.length === 0) {
       return 'Por favor, seja mais específico no nome do produto.';
     }
 
-    // 4. 🔥 EXIGE QUE A PALAVRA ESTEJA NO NOME OU NA CATEGORIA (Tiramos a descrição daqui) 🔥
     const condicoesAND = termos.map(termo => ({
-      OR: [
-        { name: { contains: termo, mode: 'insensitive' as const } },
-        { categories: { some: { name: { contains: termo, mode: 'insensitive' as const } } } }
-      ]
+      name: { contains: termo, mode: 'insensitive' as const }
     }));
 
+    // 2. BUSCA NOS PRODUTOS ISOLADOS
     const products = await prisma.product.findMany({
-      where: {
-        isActive: true,
-        stock: { gt: 0 },
-        AND: condicoesAND
-      },
-      take: 8,
-      select: {
-        name: true,
-        price: true,
-        description: true,
-      }
+      where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
+      
+      select: { name: true, price: true }
     });
 
-    if (products.length === 0) {
-      return `Não encontrei produtos exatamente para "${termoBusca}".`;
+    // 3. BUSCA NOS KITS PROMOCIONAIS (A Mágica Nova!)
+    const kits = await prisma.kit.findMany({
+      where: { isActive: true, AND: condicoesAND },
+      take: 3,
+      select: { name: true, finalPrice: true }
+    });
+
+    if (products.length === 0 && kits.length === 0) {
+      return `Não encontrei produtos ou kits exatamente para "${termoBusca}".`;
     }
 
     let text = `Encontrei essas opções pra você 👇\n\n`;
-    products.forEach((p, i) => {
-      text += `*${i + 1}. ${p.name}*\n`;
-      text += `💰 R$ ${Number(p.price).toFixed(2)}\n\n`; // Removemos a descrição e deixamos só preço e quebra de linha
+    let contador = 1;
+
+    // Lista os Kits primeiro (se houver)
+    kits.forEach((k) => {
+      text += `*${contador}. ${k.name}*\n💰 R$ ${Number(k.finalPrice).toFixed(2)}\n\n`;
+      contador++;
+    });
+
+    // Depois lista os produtos isolados
+    products.forEach((p) => {
+      text += `*${contador}. ${p.name}*\n💰 R$ ${Number(p.price).toFixed(2)}\n\n`;
+      contador++;
     });
 
     text += `_Qual desses te interessou? Me fala o nome do produto ou o número!_`;
@@ -337,85 +365,80 @@ export class ChatbotContext {
   }
 
   async verDetalhesProduto(nomeProduto: string): Promise<string> {
-    // 1. Quebra o termo buscado em palavras separadas (Mini-Google)
-    const termos = nomeProduto.split(' ').filter(t => t.trim().length > 0);
-    const condicoesAND = termos.map(termo => ({
+    let termoLimpo = nomeProduto
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Tira acentos
+      .toLowerCase();
+    // let termoLimpo = nomeProduto
+    //   .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    //   .toLowerCase()
+    //   .replace(/creatina|creatine/g, 'creatin')
+    //   .replace(/proteina|protein/g, 'whey')
+    //   .replace(/termogenico|queimador|fat[- ]?burner/g, 'emagrecimento')
+    //   .replace(/combo/g, 'kit')
+    //   .replace(/pre[- ]?workout/g, 'treino')
+    //   .replace(/pre[- ]?treino/g, 'treino');
+
+    // Removemos a palavra "kit" daqui para usá-la como diferencial!
+    const palavrasInuteis = [
+      'promocao', 'promo', 'unidades', 'unidade', 'pack', 'de', 'com', 'x', 'para', 'o', 'a', 'e',
+      'powder', 'dietary', 'supplement', 'suplemento', 'flavor', 'sabor', 'nutrition', 'advanced', 'formula'
+    ];
+
+ const termos = termoLimpo.split(' ').filter((t: string) => t.trim().length > 1 && !palavrasInuteis.includes(t) && isNaN(Number(t)));
+
+    if (termos.length === 0) return `O item "${nomeProduto}" não foi encontrado.`;
+
+    const condicoesAND = termos.map((termo: string) => ({
       name: { contains: termo, mode: 'insensitive' as const }
     }));
 
-    // 2. TENTA BUSCAR NOS PRODUTOS ISOLADOS
-    const product = await prisma.product.findFirst({
-      where: {
-        isActive: true,
-        stock: { gt: 0 },
-        AND: condicoesAND
-      },
-      select: {
-        name: true,
-        price: true,
-        description: true,
-        imageUrl: true,
-      }
-    });
+    // Verifica se o cliente quer explicitamente um KIT
+    const buscandoKit = termos.includes('kit');
 
-    if (product) {
+    // Função interna para formatar o Produto
+    const formatarProduto = (p: any) => {
       let text = '';
-
-      // SÓ MANDA A FOTO SE ELA EXISTIR E FOR UM LINK VÁLIDO (http)
-      let imageUrl = '';
-      if ((product as any).imageUrl) {
-        imageUrl = String((product as any).imageUrl).trim();
-      }
-
-      if (imageUrl && imageUrl.startsWith('http')) {
-        text += `[IMG:${imageUrl}]\n`;
-      }
-
-      text += `📦 *${product.name}*\n`;
-      text += `💰 *R$ ${Number(product.price).toFixed(2)}*\n`;
-      if (product.description) text += `📝 ${product.description}\n`;
-      text += `[CONFIRM:${product.name}]`;
+      let img = p.imageUrl ? String(p.imageUrl).trim() : '';
+      if (img && img.startsWith('http')) text += `[IMG:${img}]\n`;
+      text += `📦 *${p.name}*\n💰 *R$ ${Number(p.price).toFixed(2)}*\n`;
+      if (p.description) text += `📝 ${p.description}\n`;
+      text += `[CONFIRM:${p.name}]`;
       return text;
+    };
+
+    // Função interna para formatar o Kit
+    const formatarKit = (k: any) => {
+      let text = '';
+      let img = k.imageUrl ? String(k.imageUrl).trim() : '';
+      if (img && img.startsWith('http')) text += `[IMG:${img}]\n`;
+      const itens = k.items.map((i: any) => `${i.quantity}x ${i.product.name}`).join(', ');
+      text += `🔥 *${k.name}*\n💰 *R$ ${Number(k.finalPrice).toFixed(2)}*\n📝 Composição: ${itens}\n`;
+      text += `[CONFIRM:${k.name}]`;
+      return text;
+    };
+
+    if (buscandoKit) {
+      // Prioridade 1: Procura no Kit
+      const kitEncontrado = await prisma.kit.findFirst({ where: { isActive: true, AND: condicoesAND }, include: { items: { include: { product: { select: { name: true } } } } } });
+      if (kitEncontrado) return formatarKit(kitEncontrado);
+
+      // Se não achou kit, tenta produto
+      const prodEncontrado = await prisma.product.findFirst({ where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND } });
+      if (prodEncontrado) return formatarProduto(prodEncontrado);
+    } else {
+      // Prioridade 1: Procura no Produto
+      const prodEncontrado = await prisma.product.findFirst({ where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND } });
+      if (prodEncontrado) return formatarProduto(prodEncontrado);
+
+      // Se não achou produto, tenta kit
+      const kitEncontrado = await prisma.kit.findFirst({ where: { isActive: true, AND: condicoesAND }, include: { items: { include: { product: { select: { name: true } } } } } });
+      if (kitEncontrado) return formatarKit(kitEncontrado);
     }
 
-    // 3. SE NÃO ACHOU, TENTA BUSCAR NOS KITS PROMOCIONAIS
-    const kit = await prisma.kit.findFirst({
-      where: {
-        isActive: true,
-        AND: condicoesAND
-      },
-      include: {
-        items: {
-          include: { product: { select: { name: true } } }
-        }
-      }
-    });
-
-    if (kit) {
-      let text = '';
-
-      // 👇 SÓ MANDA A FOTO SE O KIT TIVER UM LINK VÁLIDO
-      let kitImageUrl = (kit as any).imageUrl;
-      if ((kit as any).imageUrl) {
-        kitImageUrl = String((kit as any).imageUrl).trim();
-      }
-
-      if (kitImageUrl && kitImageUrl.startsWith('http')) {
-        text += `[IMG:${kitImageUrl}]\n`;
-      }
-
-      const itemsList = kit.items.map((i) => `${i.quantity}x ${i.product.name}`).join(', ');
-
-      text += `🔥 *${kit.name}*\n`;
-      text += `💰 *R$ ${Number(kit.finalPrice).toFixed(2)}*\n`;
-      text += `📝 Composição: ${itemsList}\n`;
-      text += `[CONFIRM:${kit.name}]`;
-      return text;
-    }
-
-    // 4. SE NÃO ACHOU EM NENHUM DOS DOIS
     return `O item "${nomeProduto}" não foi encontrado no estoque ou nas promoções ativas.`;
   }
+
+
   async excluirConversa(sessionKey: string): Promise<string> {
     try {
       const session = await prisma.chatSession.findUnique({
@@ -443,6 +466,55 @@ export class ChatbotContext {
     } catch (error) {
       console.error('[Excluir Conversa Error]:', error);
       return `erro`;
+    }
+  }
+
+  async removerProdutoDoCarrinho(session: any, nomeProduto: string): Promise<string> {
+    if (!session.carrinho || session.carrinho.length === 0) {
+      return "Seu carrinho já está vazio.";
+    }
+
+    // Filtra o carrinho removendo o item (busca por aproximação simples)
+    const novoCarrinho = session.carrinho.filter((item: string) => 
+      !item.toLowerCase().includes(nomeProduto.toLowerCase())
+    );
+
+    if (novoCarrinho.length === session.carrinho.length) {
+      return `Não encontrei o item "${nomeProduto}" no seu carrinho.`;
+    }
+
+    session.carrinho = novoCarrinho;
+    // O saveSession será feito pelo worker após a execução da tool
+    
+    if (novoCarrinho.length === 0) {
+      return `Prontinho! Removi o item. Seu carrinho agora está vazio.`;
+    }
+
+    return `Entendido! Removi o item. Seu carrinho atualizado tem: ${novoCarrinho.join(', ')}.`;
+  }
+
+  async cancelarAtendimento(sessionKey: string): Promise<string> {
+    try {
+      // 1. Procura se existe um pedido PENDENTE no banco para esse cliente
+      const order = await prisma.order.findFirst({
+        where: { 
+          user: { chatSessions: { some: { sessionKey } } },
+          status: 'PENDING' 
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      if (order) {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { status: 'CANCELLED' }
+        });
+      }
+
+      return "Pedido e atendimento cancelados com sucesso. Se precisar de algo, é só chamar!";
+    } catch (error) {
+      console.error('Erro ao cancelar:', error);
+      return "Ocorreu um erro ao cancelar, mas já limpei sua sessão.";
     }
   }
 }

@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { DashboardController } from './dashboard.controller.js';
 import { verifyJwt } from '../../shared/middlewares/verify-jwt.js';
-import { dashboardQuerySchema, paginationQuerySchema } from './dashboard.schema.js';
+import { dashboardQuerySchema, paginationQuerySchema, topProductsQuerySchema } from './dashboard.schema.js';
 
 
 const dashboardController = new DashboardController();
@@ -30,4 +30,12 @@ export async function dashboardRoutes(app: FastifyInstance) {
       querystring: paginationQuerySchema
     }
   }, dashboardController.recentOrders);
+
+  app.withTypeProvider<ZodTypeProvider>().get('/top-products', {
+    schema: { 
+      tags: ['Dashboard'], 
+      summary: 'Lista os produtos mais vendidos',
+      querystring: topProductsQuerySchema
+    }
+  }, dashboardController.topProducts.bind(dashboardController));
 }

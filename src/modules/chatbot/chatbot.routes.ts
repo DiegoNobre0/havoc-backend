@@ -6,7 +6,8 @@ import {
   sessionQuerySchema, 
   sendMessageSchema, 
   toggleStatusSchema, 
-  updateConfigBodySchema
+  updateConfigBodySchema,
+  updateSessionStatusSchema
 } from './chatbot.schemas.js';
 import { ChatbotController } from './chatbot.controller.js';
 import { verifyJwt } from '../../shared/middlewares/verify-jwt.js';
@@ -40,14 +41,14 @@ export async function chatbotRoutes(app: FastifyInstance) {
     schema: { tags: ['Chatbot'], summary: 'Envia mensagem como Atendente Humano', params: idParamSchema, body: sendMessageSchema }
   }, controller.sendMessage.bind(controller));
 
+  app.post('/sessions/:id/media', {
+    schema: { tags: ['Chatbot'], summary: 'Envia arquivo (Imagem, Áudio, Doc)', params: idParamSchema }
+  }, controller.sendMedia.bind(controller));
+
   // ==========================================
   // ⚙️ ROTAS DE CONTROLE (HANDOFF)
   // ==========================================
-  app.withTypeProvider<ZodTypeProvider>().patch('/sessions/:id/status', {
-    schema: { tags: ['Chatbot'], summary: 'Pausa/Retoma a Inteligência Artificial', params: idParamSchema, body: toggleStatusSchema }
-  }, controller.toggleStatus.bind(controller));
-
-  // Adicione junto das suas outras rotas
+ 
   app.withTypeProvider<ZodTypeProvider>().get('/config', {
     schema: { tags: ['Chatbot'], summary: 'Obtém as configurações atuais da IA', security: [{ bearerAuth: [] }] }
   }, controller.getConfig.bind(controller));
@@ -55,4 +56,13 @@ export async function chatbotRoutes(app: FastifyInstance) {
   app.withTypeProvider<ZodTypeProvider>().put('/config', {
     schema: { tags: ['Chatbot'], summary: 'Atualiza o prompt e regras da IA', body: updateConfigBodySchema, security: [{ bearerAuth: [] }] }
   }, controller.updateConfig.bind(controller));
+
+  app.withTypeProvider<ZodTypeProvider>().patch('/sessions/:id/status', {
+    schema: { tags: ['Chatbot'], summary: 'Pausa/Retoma a Inteligência Artificial', params: idParamSchema, body: toggleStatusSchema }
+  }, controller.toggleStatus.bind(controller));
+
+  // 👉 NOVA ROTA: Atualiza a etiqueta visual (Tag) do atendimento
+  app.withTypeProvider<ZodTypeProvider>().patch('/sessions/:id/tag', {
+    schema: { tags: ['Chatbot'], summary: 'Atualiza a tag/etiqueta do atendimento', params: idParamSchema, body: updateSessionStatusSchema }
+  }, controller.updateStatusTag.bind(controller));
 }
