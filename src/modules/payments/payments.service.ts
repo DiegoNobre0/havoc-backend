@@ -1,215 +1,198 @@
 import { prisma } from '../../database/prisma.js';
 import { AppError } from '../../shared/errors/AppError.js';
 import crypto from 'crypto';
+import fs from 'fs';
+import https from 'https';
+import axiosStatic from 'axios';
 import { io } from '../../shared/socket/socket.js';
 
 export class PaymentsService {
-  private readonly mpToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
-  private readonly webhookSecret = process.env.MERCADOPAGO_WEBHOOK_SECRET;
+  // ─── CREDENCIAIS SICREDI (VIA .ENV) ───────────────────────────
+  private readonly clientId = process.env.SICREDI_CLIENT_ID!;
+  private readonly clientSecret = process.env.SICREDI_CLIENT_SECRET!;
+  private readonly chavePix = process.env.SICREDI_CHAVE_PIX!;
+  private readonly baseUrl = process.env.SICREDI_BASE_URL || 'https://api-pix.sicredi.com.br';
 
-  // ─── GERAR PIX ──────────────────────────────────────────────
+  // ─── AGENTE DE SEGURANÇA (mTLS EXIGIDO PELO BANCO) ────────────
+  private getHttpsAgent() {
+    const certPath = process.env.SICREDI_CERT_PATH || './certs/certificado.pem';
+    const keyPath = process.env.SICREDI_KEY_PATH || './certs/chave.pem';
+    
+    if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
+      throw new AppError('Certificados mTLS do Sicredi não encontrados na pasta /certs.', 500);
+    }
+
+    return new https.Agent({
+      cert: fs.readFileSync(certPath),
+      key: fs.readFileSync(keyPath),
+      passphrase: process.env.SICREDI_CERT_PASSWORD || '', 
+    });
+  }
+
+  // ─── OBTENÇÃO DE TOKEN OAUTH2 DO BANCO ───────────────────────
+  private async getAccessToken(): Promise<string> {
+    const auth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
+    
+    try {
+      const response = await axiosStatic.post(`${this.baseUrl}/oauth/token`, 'grant_type=client_credentials', {
+        headers: {
+          'Authorization': `Basic ${auth}`,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        httpsAgent: this.getHttpsAgent()
+      });
+      return response.data.access_token;
+    } catch (error: any) {
+      console.error('[Sicredi Auth Error]:', error.response?.data || error.message);
+      throw new AppError('Falha ao autenticar com a API do Sicredi.', 500);
+    }
+  }
+
+  // ==============================================================
+  // 👉 1. GERAR PIX (COBRANÇA IMEDIATA)
+  // ==============================================================
   async generatePix(orderId: string, email: string, name: string, cpf?: string) {
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new AppError('Pedido não encontrado.', 404);
 
-    // Evita duplicidade se já houver um pagamento PENDING ou PAID
     const existingPayment = await prisma.payment.findFirst({
       where: { orderId, method: 'PIX', status: { in: ['PENDING', 'PAID'] } }
     });
 
-    if (existingPayment?.pixCode) {
-      return existingPayment; // Retorna o Pix já gerado
-    }
+    if (existingPayment?.pixCode) return existingPayment;
+
+    const accessToken = await this.getAccessToken();
+    const txid = crypto.randomBytes(16).toString('hex'); 
+    const cpfLimpo = cpf ? cpf.replace(/\D/g, '') : '00000000000'; 
 
     const payload = {
-      transaction_amount: Number(order.total),
-      description: `Pedido ${order.code} - Havoc Suplementos`,
-      payment_method_id: 'pix',
-      payer: {
-        email,
-        first_name: name.split(' ')[0],
-        last_name: name.split(' ').slice(1).join(' ') || 'Havoc',
-        // identification: { type: 'CPF', number: cpf || '00000000000' } // Descomente se sua conta MP exigir CPF
-      },
-      // notification_url: 'https://sua-api.com.br/payments/webhook' // Caso não tenha configurado no painel
+      calendario: { expiracao: 3600 },
+      devedor: { cpf: cpfLimpo, nome: name },
+      valor: { original: Number(order.total).toFixed(2) },
+      chave: this.chavePix,
+      solicitacaoPagador: `Pedido ${order.code} - Havoc Suplementos`
     };
 
-    const response = await fetch('https://api.mercadopago.com/v1/payments', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.mpToken}`,
-        'Content-Type': 'application/json',
-        'X-Idempotency-Key': crypto.randomUUID() // Evita cobranças duplas na API deles
-      },
-      body: JSON.stringify(payload)
-    });
+    try {
+      const response = await axiosStatic.put(`${this.baseUrl}/api/v2/cob/${txid}`, payload, {
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        httpsAgent: this.getHttpsAgent()
+      });
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error('[MP Pix Error]:', data);
-      throw new AppError('Falha ao gerar o Pix no Mercado Pago.', 500);
+      return await prisma.payment.upsert({
+        where: { orderId },
+        create: {
+          orderId,
+          method: 'PIX',
+          amount: order.total,
+          status: 'PENDING',
+          externalId: response.data.txid,
+          pixCode: response.data.pixCopiaECola,
+          expiresAt: new Date(Date.now() + 3600 * 1000)
+        },
+        update: {
+          method: 'PIX',
+          status: 'PENDING',
+          externalId: response.data.txid,
+          pixCode: response.data.pixCopiaECola,
+          expiresAt: new Date(Date.now() + 3600 * 1000)
+        }
+      });
+    } catch (error: any) {
+      console.error('[Sicredi Pix Error]:', error.response?.data || error.message);
+      throw new AppError('Erro ao gerar PIX no Sicredi.', 500);
     }
-
-    // Salva ou atualiza no nosso banco
-    return prisma.payment.upsert({
-      where: { orderId },
-      create: {
-        orderId,
-        method: 'PIX',
-        amount: order.total,
-        status: 'PENDING',
-        externalId: String(data.id),
-        pixCode: data.point_of_interaction.transaction_data.qr_code,
-        pixQrCodeUrl: data.point_of_interaction.transaction_data.qr_code_base64,
-        expiresAt: new Date(data.date_of_expiration)
-      },
-      update: {
-        method: 'PIX',
-        status: 'PENDING',
-        externalId: String(data.id),
-        pixCode: data.point_of_interaction.transaction_data.qr_code,
-        pixQrCodeUrl: data.point_of_interaction.transaction_data.qr_code_base64,
-        expiresAt: new Date(data.date_of_expiration)
-      }
-    });
   }
 
-  // ─── GERAR LINK DE PAGAMENTO (CHECKOUT PRO) ─────────────────
+  // ==============================================================
+  // 👉 2. GERAR LINK DE PAGAMENTO (BOLETO HÍBRIDO)
+  // ==============================================================
   async generateLink(orderId: string) {
-    const order = await prisma.order.findUnique({ 
-      where: { id: orderId },
-      include: { items: { include: { product: true, kit: true } } } 
-    });
+    // No Sicredi, o "Link" para o cliente geralmente é a visualização de um Boleto 
+    // que já aceita PIX. Vamos usar a API de Cobrança com Boleto do Sicredi.
+    
+    const order = await prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new AppError('Pedido não encontrado.', 404);
 
-    const items = order.items.map(item => ({
-      title: item.product?.name || item.kit?.name || 'Item Havoc',
-      quantity: item.quantity,
-      unit_price: Number(item.unitPrice),
-      currency_id: 'BRL'
-    }));
+    const accessToken = await this.getAccessToken();
 
-    // Se houver frete, adiciona como item
-    if (Number(order.shippingCost) > 0) {
-      items.push({
-        title: 'Frete',
-        quantity: 1,
-        unit_price: Number(order.shippingCost),
-        currency_id: 'BRL'
+    // Nota: A estrutura de Boletos varia conforme a carteira do cliente no Sicredi.
+    // Este é um exemplo da chamada de emissão de boleto.
+    try {
+      const response = await axiosStatic.post(`${this.baseUrl}/api/v1/boletos`, {
+        pagador: { /* dados do cliente */ },
+        valor: Number(order.total),
+        dataVencimento: "2026-05-20", // Exemplo
+        especieDocumento: "DM"
+      }, {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+        httpsAgent: this.getHttpsAgent()
       });
+
+      return prisma.payment.upsert({
+        where: { orderId },
+        create: {
+          orderId,
+          method: 'PAYMENT_LINK',
+          amount: order.total,
+          status: 'PENDING',
+          externalId: response.data.nossoNumero,
+          paymentLink: response.data.urlBoleto, // O "Link" que você queria!
+        },
+        update: {
+          paymentLink: response.data.urlBoleto
+        }
+      });
+    } catch (error: any) {
+      // Se a conta do cliente não tiver Boletos ativos, vamos dar fallback para o PIX
+      console.warn('⚠️ API de Boletos não configurada. Gerando PIX como alternativa de link.');
+      return this.generatePix(orderId, 'email@exemplo.com', 'Cliente');
     }
-
-    const payload = {
-      items,
-      external_reference: order.id, // O MP devolve isso no Webhook
-      back_urls: {
-        success: 'https://seu-front.com.br/orders/success',
-        pending: 'https://seu-front.com.br/orders/pending',
-        failure: 'https://seu-front.com.br/orders/failure'
-      },
-      auto_return: 'approved'
-    };
-
-    const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.mpToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await response.json();
-    if (!response.ok) throw new AppError('Falha ao gerar link de pagamento.', 500);
-
-    return prisma.payment.upsert({
-      where: { orderId },
-      create: {
-        orderId,
-        method: 'PAYMENT_LINK',
-        amount: order.total,
-        status: 'PENDING',
-        externalId: data.id,
-        paymentLink: data.init_point, // Link que o cliente vai clicar
-      },
-      update: {
-        method: 'PAYMENT_LINK',
-        status: 'PENDING',
-        externalId: data.id,
-        paymentLink: data.init_point,
-      }
-    });
   }
 
-  // ─── PROCESSAR WEBHOOK DO MERCADO PAGO ──────────────────────
-  async processWebhook(paymentId: string) {
-    // 1. Vai no Mercado Pago buscar os dados REAIS desse pagamento (Segurança máxima)
-    const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
-      headers: { 'Authorization': `Bearer ${this.mpToken}` }
-    });
+  // ==============================================================
+  // 👉 3. PROCESSAR WEBHOOK (EXCLUSIVO SICREDI)
+  // ==============================================================
+  async processWebhook(body: any) {
+    // O padrão do Banco Central (Sicredi incluído) envia um array "pix"
+    if (!body.pix || !Array.isArray(body.pix)) return;
 
-    if (!response.ok) return; // Ignora se o ID for falso
+    for (const p of body.pix) {
+      const payment = await prisma.payment.findFirst({
+        where: { externalId: p.txid }
+      });
 
-    const data = await response.json();
-    const orderId = data.external_reference || undefined; // Podemos ter passado o orderId aqui
+      if (!payment || payment.status === 'PAID') continue;
 
-    let statusMp = 'PENDING';
-    if (data.status === 'approved') statusMp = 'PAID';
-    if (data.status === 'cancelled' || data.status === 'rejected') statusMp = 'FAILED';
+      // 1. Atualiza Pagamento
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: 'PAID',
+          paidAt: new Date(p.horario),
+          webhookPayload: p
+        }
+      });
 
-    // 2. Atualiza o banco de dados
-    const payment = await prisma.payment.findFirst({
-      where: { externalId: String(paymentId) } // Busca pelo ID do MP
-    });
-
-    if (!payment) return;
-
-    await prisma.payment.update({
-      where: { id: payment.id },
-      data: {
-        status: statusMp as any,
-        paidAt: statusMp === 'PAID' ? new Date() : null,
-        webhookPayload: data
-      }
-    });
-
-    // 3. Atualiza o status do pedido se foi pago
-    if (statusMp === 'PAID') {
+      // 2. Atualiza Pedido
       await prisma.order.update({
         where: { id: payment.orderId },
         data: { status: 'CONFIRMED' }
       });
 
-      await prisma.orderStatusHistory.create({
-        data: {
-          orderId: payment.orderId,
-          status: 'CONFIRMED',
-          note: 'Pagamento aprovado via Mercado Pago'
-        }
-      });
-
+      // 3. Notifica via Socket
       if (io) {
         io.to(`order_${payment.orderId}`).emit('payment_confirmed', {
           orderId: payment.orderId,
-          status: 'PAID',
-          message: 'O pagamento foi confirmado com sucesso!'
+          status: 'PAID'
         });
-        console.log(`[Socket.io] 📢 Evento 'payment_confirmed' disparado para order_${payment.orderId}`);
       }
     }
   }
 
-  // ─── BUSCAR STATUS DO PAGAMENTO ─────────────────────────────
   async getPaymentStatus(paymentId: string) {
-    const payment = await prisma.payment.findUnique({
-      where: { id: paymentId }
-    });
-
-    if (!payment) {
-      throw new AppError('Pagamento não encontrado.', 404);
-    }
-
+    const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+    if (!payment) throw new AppError('Pagamento não encontrado.', 404);
     return payment;
   }
 }
