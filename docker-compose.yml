@@ -3,6 +3,10 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: havoc_postgres
+    deploy:
+      resources:
+        limits:
+          memory: 1gb
     restart: always
     ports:
       - "5433:5432"
@@ -19,6 +23,10 @@ services:
   redis:
     image: redis:7-alpine
     container_name: havoc_redis
+    deploy:
+      resources:
+        limits:
+          memory: 512mb
     restart: always
     ports:
       - "6380:6379"

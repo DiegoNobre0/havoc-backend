@@ -7,14 +7,19 @@ const authController = new AuthController();
 
 export async function authRoutes(app: FastifyInstance) {
   // Rota de Login
-  app.withTypeProvider<ZodTypeProvider>().post('/login', {
+app.withTypeProvider<ZodTypeProvider>().post('/login', {
+    config: {      
+      rateLimit: {
+        max: 10,
+        timeWindow: '1 minute'
+      }
+    },
     schema: {
       tags: ['Autenticação'],
       summary: 'Realiza o login e retorna os tokens',
       body: loginBodySchema,
     },
   }, authController.login);
-
   // Rota de Refresh
   app.withTypeProvider<ZodTypeProvider>().post('/refresh', {
     schema: {

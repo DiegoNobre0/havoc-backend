@@ -1,7 +1,7 @@
 import fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import rateLimit from '@fastify/rate-limit';
+import rateLimit, { fastifyRateLimit } from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import multipart from '@fastify/multipart';
@@ -19,6 +19,7 @@ import { whatsappWebhookRoutes } from './modules/whatsappWebhook/whatsAppWebhook
 import { chatbotRoutes } from './modules/chatbot/chatbot.routes.js';
 import { shippingRoutes } from './modules/shipping/shipping.routes.js';
 import { paymentsRoutes } from './modules/payments/payments.routes.js';
+import { redis } from './shared/redis/redis.js';
 
 export const app = fastify({
   loggerInstance: logger, 
@@ -29,6 +30,19 @@ app.setValidatorCompiler(validatorCompiler);
 app.setSerializerCompiler(serializerCompiler);
 
 app.setErrorHandler(errorHandler);
+
+await app.register(fastifyRateLimit, {
+    max: 100, // Limite global padrão: 100 requisições
+    timeWindow: '1 minute', // a cada 1 minuto por IP
+    redis: redis, // Salva a contagem no seu Redis!
+    errorResponseBuilder: function (request, context) {
+      return {
+        statusCode: 429,
+        error: 'Too Many Requests',
+        message: `Calma lá! Você atingiu o limite de requisições. Tente novamente em ${context.after}.`
+      }
+    }
+  });
 
 // Segurança base
 app.register(helmet);
@@ -76,8 +90,13 @@ app.register(swaggerUi, {
 app.register(multipart);
 
 // Rota de Healthcheck
-app.get('/health', async () => {
-  return { status: 'ok', timestamp: new Date() };
+app.get('/health', async (request, reply) => {
+  return reply.status(200).send({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(), // Quanto tempo o servidor está no ar
+    memoryUsage: process.memoryUsage() // Para monitorar vazamento de memória
+  });
 });
 
 app.register(usersRoutes, { prefix: '/users' });

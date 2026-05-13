@@ -1,5 +1,6 @@
 import { prisma } from '../../database/prisma.js';
 import { PaymentsService } from '../../modules/payments/payments.service.js';
+import { redis } from '../../shared/redis/redis.js';
 
 export class ChatbotContext {
 
@@ -36,30 +37,34 @@ export class ChatbotContext {
   }
 
   // 2. Busca os Kits Promocionais ativos
-  // 2. Busca os Kits Promocionais ativos
-  async getPromoKitsContext(): Promise<string> {
+async getPromoKitsContext(): Promise<string> {
+    const cacheKey = 'chatbot:catalogo:kits_promocionais';
+    
+    // 1. Tenta buscar no Redis O(1)
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      console.log('⚡ [Redis] Retornando Kits do Cache!');
+      return cached;
+    }
+
+    // 2. Se não tem no cache, vai no PostgreSQL
     const activeKits = await prisma.kit.findMany({
       where: { isActive: true },
-      include: {
-        items: {
-          include: { product: { select: { name: true } } },
-        },
-      },
+      include: { items: { include: { product: { select: { name: true } } } } },
       take: 5,
     });
 
     if (activeKits.length === 0) return 'Nenhum kit promocional ativo no momento.';
 
     let text = '\n🔥 KITS PROMOCIONAIS IMPERDÍVEIS:\n\n';
-
     activeKits.forEach((kit, index) => {
-      const itemsList = kit.items
-        .map((i) => `${i.quantity}x ${i.product.name}`)
-        .join(', ');
-
+      const itemsList = kit.items.map((i) => `${i.quantity}x ${i.product.name}`).join(', ');
       text += `${index + 1}. *${kit.name}*: R$ ${Number(kit.finalPrice).toFixed(2)}\n`;
       text += `Composição: ${itemsList}\n\n`;
     });
+
+    // 3. Salva o texto pronto no Redis por 1 hora (3600 segundos)
+    await redis.set(cacheKey, text, 'EX', 3600);
 
     return text;
   }
@@ -278,35 +283,11 @@ export class ChatbotContext {
     }
   }
 
-  async listarProdutos(termoBusca: string): Promise<string> {
+async listarProdutos(termoBusca: string): Promise<string> {
     // 1. Limpeza inteligente e Tradução Universal de Suplementos
-
     let termoLimpo = termoBusca
       .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Tira acentos
       .toLowerCase();
-    // let termoLimpo = termoBusca
-    //   .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Tira os acentos
-    //   .toLowerCase()
-    //   // A. Proteínas
-    //   .replace(/proteina|protein/g, 'whey')
-    //   .replace(/beef|carne/g, 'beef')
-    //   // B. Força e Recuperação
-    //   .replace(/creatina|creatine/g, 'creatin')
-    //   .replace(/glutamina|glutamine/g, 'glutamin')
-    //   // C. Energia e Pré-Treino
-    //   .replace(/pre[- ]?workout/g, 'treino')
-    //   .replace(/pre[- ]?treino/g, 'treino')
-    //   .replace(/vasodilatador|pump/g, 'treino') // Se pedir pump/vasodilatador, sugere pré-treino
-    //   // D. Emagrecimento
-    //   .replace(/termogenico|queimador|fat[- ]?burner|emagrecedor|secar|lipo/g, 'emagrecimento')
-    //   // E. Ganho de Peso / Hipercalórico
-    //   .replace(/hipercalorico|mass[- ]?gainer|massa/g, 'hipercalorico') 
-    //   // F. Vitaminas e Saúde
-    //   .replace(/multivitaminico|vitaminas|poli/g, 'vitamin')
-    //   .replace(/omega[- ]?3|oleo de peixe/g, 'omega')
-    //   .replace(/melatonina|sono|dormir/g, 'melatonina')
-    //   // G. Combos
-    //   .replace(/combo|pacote/g, 'kit');
 
     // Dicionário de palavras inúteis expandido com termos de embalagens em inglês
     const palavrasInuteis = [
@@ -322,6 +303,21 @@ export class ChatbotContext {
       return 'Por favor, seja mais específico no nome do produto.';
     }
 
+    // 👉 NOVO: Criação da Chave de Cache única baseada na busca (ex: "chatbot:busca:whey-isolado")
+    const searchKey = termos.join('-');
+    const cacheKey = `chatbot:busca:${searchKey}`;
+
+    // 👉 NOVO: Tenta buscar no Redis O(1) antes de bater no banco
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        console.log(`⚡ [Redis] Retornando busca por "${searchKey}" do Cache!`);
+        return cached;
+      }
+    } catch (err) {
+      console.error('⚠️ [Redis Error] Falha ao ler cache, buscando no DB...', err);
+    }
+
     const condicoesAND = termos.map(termo => ({
       name: { contains: termo, mode: 'insensitive' as const }
     }));
@@ -329,11 +325,10 @@ export class ChatbotContext {
     // 2. BUSCA NOS PRODUTOS ISOLADOS
     const products = await prisma.product.findMany({
       where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
-      
       select: { name: true, price: true }
     });
 
-    // 3. BUSCA NOS KITS PROMOCIONAIS (A Mágica Nova!)
+    // 3. BUSCA NOS KITS PROMOCIONAIS
     const kits = await prisma.kit.findMany({
       where: { isActive: true, AND: condicoesAND },
       take: 3,
@@ -361,9 +356,15 @@ export class ChatbotContext {
 
     text += `_Qual desses te interessou? Me fala o nome do produto ou o número!_`;
 
+    // 👉 NOVO: Salva o resultado da busca no Redis por 30 minutos (1800 segundos)
+    try {
+      await redis.set(cacheKey, text, 'EX', 1800);
+    } catch (err) {
+      console.error('⚠️ [Redis Error] Falha ao salvar cache:', err);
+    }
+
     return text;
   }
-
   async verDetalhesProduto(nomeProduto: string): Promise<string> {
     let termoLimpo = nomeProduto
       .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Tira acentos

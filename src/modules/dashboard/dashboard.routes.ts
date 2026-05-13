@@ -3,6 +3,7 @@ import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { DashboardController } from './dashboard.controller.js';
 import { verifyJwt } from '../../shared/middlewares/verify-jwt.js';
 import { dashboardQuerySchema, paginationQuerySchema, topProductsQuerySchema } from './dashboard.schema.js';
+import { authorizeRoles } from '../../shared/middlewares/role.middleware.js';
 
 
 const dashboardController = new DashboardController();
@@ -17,6 +18,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
 
   app.withTypeProvider<ZodTypeProvider>().get('/sales-report', {
     schema: { 
+      preHandler: [authorizeRoles(['ADMIN'])],
       tags: ['Dashboard'], 
       summary: 'Retorna dados do gráfico de faturamento',
       querystring: dashboardQuerySchema
