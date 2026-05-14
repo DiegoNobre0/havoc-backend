@@ -94,14 +94,31 @@ export class ChatbotService {
   }
 
   // 5. Liga/Desliga a IA (Handoff)
-  async toggleStatus(id: string, isActive: boolean) {
+async toggleStatus(id: string, isActive: boolean) {
+    // 1. Atualiza no PostgreSQL
     const session = await prisma.chatSession.update({
       where: { id },
       data: { isActive },
       select: { id: true, isActive: true, sessionKey: true }
     });
 
-    await this.clearCache();
+    // 2. 👉 A MÁGICA DO WORKER: Atualiza a sessão específica no Redis mantendo o carrinho!
+    const workerRedisKey = `chat:session:${session.sessionKey}`;
+    const sessionCache = await (redis as any).get(workerRedisKey);
+
+    if (sessionCache) {
+      const parsedSession = JSON.parse(sessionCache);
+      parsedSession.isActive = isActive; // Atualiza só o status
+      
+      // Salva de volta (usando o TTL de 24h igual no Worker)
+      await (redis as any).set(workerRedisKey, JSON.stringify(parsedSession), 'EX', 86400);
+    }
+
+    // 3. Limpa o cache da sua API (para a tela listar as conversas certo)
+    if (this.clearCache) {
+      await this.clearCache();
+    }
+
     return session;
   }
 
@@ -142,12 +159,36 @@ export class ChatbotService {
 
   // Atualiza a Tag/Status da Sessão
   async updateSessionStatus(sessionKey: string, status: 'NOVO_ATENDIMENTO' | 'EM_ANDAMENTO' | 'AGUARDANDO_PAGAMENTO' | 'ATENDIMENTO_HUMANO' | 'FINALIZADO' | 'CANCELADO') {
+    
+    // 1. Atualiza no Prisma
     const session = await prisma.chatSession.update({
       where: { sessionKey },
-      data: { status }
+      data: { 
+        status,
+        // 👉 SEGREDO: Se finalizou ou cancelou, devolvemos o controle pra IA automaticamente
+        ...(status === 'FINALIZADO' || status === 'CANCELADO' ? { isActive: true } : {}) 
+      }
     });
 
-    await this.clearCache();
+    // 2. Limpa o cache da listagem da API (o que você já tinha)
+    if (this.clearCache) {
+      await this.clearCache();
+    }
+
+    // 3. 👉 A AMNÉSIA: Se finalizou, limpa a memória da IA no Redis
+    if (status === 'FINALIZADO' || status === 'CANCELADO') {
+      const workerSessionKey = `chat:session:${sessionKey}`;
+      const workerHistoryKey = `chat:history:${sessionKey}`;
+      
+      try {
+        await (redis as any).del(workerSessionKey);
+        await (redis as any).del(workerHistoryKey);
+        console.log(`[Backend] 🧹 Memória da IA limpa para a sessão: ${sessionKey}`);
+      } catch (err) {
+        console.error(`[Backend] ⚠️ Erro ao limpar Redis do Worker para ${sessionKey}:`, err);
+      }
+    }
+
     return session;
   }
 

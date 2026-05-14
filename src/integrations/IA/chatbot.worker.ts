@@ -110,10 +110,64 @@ Visão identificou: "${descricao}".
         await saveSession(sKey, session);
       }
 
+      // 1. Garante que temos a sessão no banco para ver o status real
+      let dbSession = await prisma.chatSession.upsert({
+        where: { sessionKey: sKey },
+        create: { sessionKey: sKey, isActive: true, status: 'NOVO_ATENDIMENTO' },
+        update: {} // Só busca, não altera nada ainda
+      });
+
+      // 2. Se estava morta (Finalizada/Cancelada), nós reabrimos!
+      if (dbSession.status === 'FINALIZADO' || dbSession.status === 'CANCELADO') {
+        console.log(`[Worker] 🔄 Cliente ${sKey} voltou! Reabrindo sessão...`);
+        
+        dbSession = await prisma.chatSession.update({
+          where: { id: dbSession.id },
+          data: { 
+            status: 'NOVO_ATENDIMENTO', // Volta pra aba "Abertos"
+            isActive: true // Devolve o controle pra IA
+          }
+        });
+
+        // Atualiza a memória do Redis na mesma hora pra IA não ficar calada
+        session.isActive = true;
+        await saveSession(sKey, session);
+      }
+
       if (!session.isActive) {
-        console.log(`[Worker] ✋ Sessão em handoff. Ignorando.`);
+        console.log(`[Worker] 👨‍💻 Sessão com Humano. Salvando mensagem sem chamar a IA.`);
+
+        // 1. Avisa o Angular instantaneamente para aparecer na tela
+       if (io) {
+          io.to(`chat_${sKey}`).emit('new_message', { role: 'USER', content: textoFinal });
+          io.to('all_chats').emit('chat_updated', { 
+            id: dbSession.id, // 👉 ENVIANDO O ID REAL DO PRISMA AQUI
+            sessionKey: sKey, 
+            lastMessage: textoFinal, 
+            role: 'USER' 
+          });
+        }
+        // 2. Salva a mensagem no banco de dados para o histórico do painel
+        await prisma.chatSession.upsert({
+          where: { sessionKey: sKey },
+          create: { sessionKey: sKey, isActive: false },
+          update: {},
+        }).then((dbSession) =>
+          prisma.chatMessage.create({
+            data: {
+              sessionId: dbSession.id,
+              role: 'USER',
+              content: textoFinal
+            }
+          })
+        ).catch((e) => console.error('[Prisma Background Error]:', e));
+
+        
+    
         return;
       }
+
+      
 
 
       // No worker, ANTES de chamar a IA, adicione este interceptador:
@@ -186,9 +240,9 @@ Quer dar uma olhada nessa sugestão ou prefere fechar o pedido agora?
         textoParaHistorico = 'Quero ver a sugestão que você me deu.';
 
         // Se conseguimos capturar o termo, forçamos a busca exata. Se não, deixamos a IA tentar deduzir.
-        const instrucaoBusca = termoSugerido
-          ? `⚠️ INSTRUÇÃO DO SISTEMA: Você acabou de sugerir "${termoSugerido}". Chame a ferramenta 'listar_produtos' AGORA buscando EXATAMENTE por "${termoSugerido}".`
-          : `⚠️ INSTRUÇÃO DO SISTEMA: Olhe para a sua última mensagem. O que você sugeriu? Chame a ferramenta 'listar_produtos' AGORA buscando por essa sugestão.`;
+       const instrucaoBusca = termoSugerido
+          ? `⚠️ INSTRUÇÃO DO SISTEMA: Você sugeriu "${termoSugerido}". Chame a ferramenta 'listar_produtos' AGORA. DICA VITAL: Não envie a palavra inteira para a ferramenta. Use sua inteligência para enviar apenas a RAIZ da palavra (ex: se for Creatina, envie 'creatin') para o banco encontrar tanto as versões em português quanto as em inglês.`
+          : `⚠️ INSTRUÇÃO DO SISTEMA: Olhe para a sua última mensagem. O que você sugeriu? Chame a ferramenta 'listar_produtos' AGORA buscando por essa sugestão. Lembre-se de enviar apenas a RAIZ da palavra (ex: 'creatin' no lugar de creatina).`;
 
         textoFinal = `[FORCAR_BUSCA]
 O cliente quer ver as opções da sugestão de upsell.
@@ -225,6 +279,14 @@ Carrinho atual: ${carrinhoTexto}.
         io.to('all_chats').emit('chat_updated', { sessionKey: sKey, lastMessage: textoFinal, role: 'USER' });
       }
 
+      await prisma.chatMessage.create({
+        data: {
+          sessionId: dbSession.id, // Usa a variável dbSession que criamos no início do arquivo
+          role: 'USER',
+          content: textoParaHistorico
+        }
+      });
+
       const aiResponse = await iaService.generateResponse(session, textoFinal, history);
       await saveSession(sKey, session); 
 
@@ -240,6 +302,8 @@ Carrinho atual: ${carrinhoTexto}.
           create: { sessionKey: sKey, isActive: false, handoffRequestedAt: new Date() },
           update: { isActive: false, handoffRequestedAt: new Date() },
         });
+
+        
 
         await adminNotificationQueue.add('handoff-request', {
           sessionKey: sKey,
@@ -293,23 +357,33 @@ Carrinho atual: ${carrinhoTexto}.
           await pushHistory(sKey, 'ASSISTANT', finalContent);
           if (io) {
             io.to(`chat_${sKey}`).emit('new_message', { role: 'ASSISTANT', content: finalContent });
-            io.to('all_chats').emit('chat_updated', { sessionKey: sKey, lastMessage: finalContent , role: 'ASSISTANT'});
+            io.to('all_chats').emit('chat_updated', { 
+              id: dbSession.id, // 👉 ENVIANDO O ID REAL DO PRISMA AQUI TAMBÉM
+              sessionKey: sKey, 
+              lastMessage: finalContent, 
+              role: 'ASSISTANT'
+            });
           }
         }
 
         // Persiste no Prisma em background...
+     // Persiste a resposta da IA no Prisma em background...
         prisma.chatSession.upsert({
           where: { sessionKey: sKey },
-          create: { sessionKey: sKey },
-          update: {},
-        }).then((dbSession) =>
-          prisma.chatMessage.createMany({
-            data: [
-              { sessionId: dbSession.id, role: 'USER', content: textoParaHistorico },
-              // Salva a resposta original (com tags) para o painel conseguir renderizar!
-              { sessionId: dbSession.id, role: 'ASSISTANT', content: aiResponse.content || '', tokens: aiResponse.tokens }
-            ],
+          create: { sessionKey: sKey, isActive: true },
+          update: { updatedAt: new Date() }, // Atualiza a hora da sessão
+        }).then((sessaoAtualizada) =>
+          
+          // 👉 CORREÇÃO 2: Cria apenas a mensagem da IA, pois a do cliente já foi salva!
+          prisma.chatMessage.create({
+            data: { 
+              sessionId: sessaoAtualizada.id, 
+              role: 'ASSISTANT', 
+              content: aiResponse.content || '', 
+              tokens: aiResponse.tokens 
+            }
           })
+
         ).catch((e) => console.error('[Prisma Background Error]:', e));
 
         // LÓGICA DE ENVIO MULTIMÍDIA E BOTÕES

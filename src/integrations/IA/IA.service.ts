@@ -26,11 +26,13 @@ export class IAService {
   private async executeTool(
     name: string,
     args: any,
-    sessionKey: string
+    session: any
   ): Promise<{ result: string; handoff: boolean; extractedTags: string }> {
     let result = '';
     let handoff = false;
     let extractedTags = '';
+
+    const sessionKey = session.sessionKey;
 
     try {
       if (name === 'listar_produtos') {
@@ -56,11 +58,11 @@ export class IAService {
           );
         }
 
-        result = resultText + '\n\n⚠️ [INSTRUÇÃO DO SISTEMA]: Apresente os resultados de forma natural e animada. Se o cliente acabou de enviar uma foto ou for o primeiro contato, inicie a mensagem com uma saudação amigável (Bom dia/Boa tarde). ⚠️ REGRA ABSOLUTA: Repasse os produtos listados acima EXATAMENTE como estão. É ESTRITAMENTE PROIBIDO inventar itens ou alterar preços.. Se o sistema retornou apenas 1 opção, apresente APENAS 1 opção. NUNCA crie produtos da sua cabeça para "encher" a lista.';
+        result = resultText + '\n\n⚠️ [INSTRUÇÃO DO SISTEMA]: Apresente os resultados de forma animada. ⚠️ REGRA ABSOLUTA: Repasse os produtos listados acima EXATAMENTE como estão, MANTENDO os números das opções (1., 2., etc) para o cliente poder escolher. NUNCA junte categorias ou altere a formatação.';
       } else if (name === 'ver_detalhes_do_produto') {
         const rawResult = await this.contextHelper.verDetalhesProduto(args.nome_produto);
 
-         await this.chatbotService.updateSessionStatus(sessionKey, 'EM_ANDAMENTO');
+        await this.chatbotService.updateSessionStatus(sessionKey, 'EM_ANDAMENTO');
 
         // Se não encontrou o produto, avisa a IA e proíbe ela de tentar vender o fantasma
         if (rawResult.includes('não foi encontrado')) {
@@ -116,12 +118,12 @@ export class IAService {
         result = resultText + '\n\n⚠️ [INSTRUÇÃO DO SISTEMA]: Copie e apresente os kits promocionais acima para o cliente com muita energia. NUNCA invente combos. Após mostrar, pergunte qual combo ele quer garantir!';
       }
       else if (name === 'remover_item_carrinho') {
-        result = await this.contextHelper.removerProdutoDoCarrinho(args.session, args.nome_produto);
-      } 
+       result = await this.contextHelper.removerProdutoDoCarrinho(session, args.nome_produto);
+      }
       else if (name === 'cancelar_pedido_e_sessao') {
         result = await this.contextHelper.cancelarAtendimento(sessionKey);
         // Aqui podemos resetar o carrinho no Redis também
-        args.session.carrinho = [];
+        session.carrinho = [];
       }
       else {
         result = `Ferramenta "${name}" não reconhecida.`;
@@ -198,13 +200,18 @@ Exemplo de saída perfeita: 'Nuclear Rush Pre Treino Body Action' ou 'Kit Creati
   ): Promise<AIResponse> {
     const config = await prisma.chatbotConfig.findFirst({ where: { isActive: true } });
 
+    const horaAtual = parseInt(new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "numeric" }));
+    let saudacao = 'Bom dia';
+    if (horaAtual >= 12 && horaAtual < 18) saudacao = 'Boa tarde';
+    else if (horaAtual >= 18 || horaAtual < 5) saudacao = 'Boa noite';
+
     // ─── 1. Saudação e Prompts ───
     const isPrimeiroContato = history.length === 0;
     const regraDeSaudacao = isPrimeiroContato
       ? `
         [REGRA DE ABORDAGEM INICIAL]
         Este é o PRIMEIRO contato do cliente com a loja. Apresente-se com ALTO ASTRAL.
-        Diga APENAS: "Bom dia/Boa tarde! Tudo bem? Me chamo Carol, sou consultora da Havoc Suplementos. Como posso te ajudar hoje?"
+        Diga APENAS: "${saudacao}! Tudo bem? Me chamo Carol, sou consultora da Havoc Suplementos. Como posso te ajudar hoje?"
         ⚠️ REGRA ESTRITA: PARE POR AÍ. Aguarde ele dizer o que precisa.
       `
       : `
@@ -212,7 +219,6 @@ Exemplo de saída perfeita: 'Nuclear Rush Pre Treino Body Action' ou 'Kit Creati
         NÃO faça novas saudações. É ESTRITAMENTE PROIBIDO dizer "Olá", "Bom dia" ou "Que bom ter você de volta" no meio da conversa.
         Foque apenas em ler a última mensagem do cliente e seguir para a próxima etapa do Funil de Vendas.
       `;
-
     const basePrompt = `
 Você é a Carol, a principal consultora especialista da Havoc Suplementos.
 Sua personalidade: Jovem, atlética, extremamente simpática, com alta energia e foco em ajudar o cliente a alcançar seus resultados. Você fala de forma natural e humanizada, como uma amiga do WhatsApp (mas sempre profissional).
@@ -235,8 +241,9 @@ Sua personalidade: Jovem, atlética, extremamente simpática, com alta energia e
 - PROTOCOLO LACTOSE: Se o cliente citar intolerância à lactose, chame a ferramenta 'listar_produtos' buscando por Proteína Isolada ou Beef Protein. NUNCA indique Whey Concentrado.
 
 🛑 GESTÃO DE ERROS E DESISTÊNCIA:
-- Se o cliente disser "tira o whey", "errei o produto" ou "não quero mais a creatina": Chame 'remover_item_carrinho'.
-- Se o cliente disser "cancela tudo", "desisto" ou "não vou comprar mais": Chame 'cancelar_pedido_e_sessao'. Seja educada e diga que as portas estão abertas.
+- Se o cliente pedir para tirar algo DO CARRINHO (ex: "tira o whey", "errei o produto"): Chame 'remover_item_carrinho'.
+- Se o cliente APENAS REJEITAR a lista (ex: "não quero essas", "nenhuma", "não gostei"): NÃO remova nada. Pergunte qual marca/sabor ele prefere ou chame 'listar_produtos' buscando alternativas.
+- Se o cliente disser "cancela tudo", "desisto": Chame 'cancelar_pedido_e_sessao'.
 
 🚀 ATALHO MULTIMODAL E KITS:
 - Imagem: Se o sistema avisar que o cliente enviou uma foto, agradeça a foto, mas SEGURE A VENDA. Faça as Etapas 1 e 2 antes de dar os detalhes do produto da foto.
@@ -303,18 +310,19 @@ Siga este fluxo EXATAMENTE nesta ordem de Passos:
       //     },
       //   },
       // },
-      {
+   {
         type: 'function',
         function: {
           name: 'listar_produtos',
           description: `Busca produtos e acessórios no banco de dados. 
-⚠️ REGRA DE OURO DA BUSCA: Antes de pesquisar, interprete o que o cliente quer e TRADUZA para a categoria/palavra-chave correta do nosso banco de dados.
-- Se pedir "proteína", "pra crescer", "massa magra" -> busque 'whey' ou 'protein'.
-- Se pedir "secar", "emagrecer", "termogênico", "fat burner" -> busque 'emagrecimento'.
-- Se pedir "energia", "pump", "pre workout" -> busque 'treino'.
-- Se pedir "ganhar peso", "massa" -> busque 'hipercalorico'.
-- Se pedir acessórios (coqueteleira, luva, strap, garrafa) -> busque pelo nome exato do item.
-Passe APENAS a palavra-chave limpa (ex: "emagrecimento", "whey", "coqueteleira"). NUNCA invente produtos, use sempre o retorno desta ferramenta.`,
+⚠️ REGRA DE OURO DA BUSCA (RAIZ DA PALAVRA):
+Nosso banco de dados mistura rótulos em Inglês e Português (ex: "Creatina" e "Creatine"). Para a busca não falhar, você DEVE enviar apenas o RADICAL/RAIZ da palavra principal.
+- Se o cliente pedir Creatina ou Creatine -> envie APENAS 'creatin'.
+- Se pedir Glutamina ou Glutamine -> envie APENAS 'glutamin'.
+- Se pedir Proteína -> envie 'whey' ou 'protein'.
+- Se pedir Pré-treino ou Pre workout -> envie 'treino' ou 'workout'.
+- Se pedir marca (Integral, Black Skull) -> envie o nome da marca.
+Use sua inteligência artificial para deduzir a raiz da palavra e envie APENAS ela.`,
           parameters: {
             type: 'object',
             properties: { termo_busca: { type: 'string' } },
@@ -431,6 +439,7 @@ Passe APENAS a palavra-chave limpa (ex: "emagrecimento", "whey", "coqueteleira")
       tools,
       tool_choice: forcedTool,
       temperature: forcedTemperature,
+      parallel_tool_calls: false,
     });
 
     const responseMessage = firstResponse.choices[0].message;
@@ -448,7 +457,7 @@ Passe APENAS a palavra-chave limpa (ex: "emagrecimento", "whey", "coqueteleira")
           const { result, handoff, extractedTags } = await this.executeTool(
             toolCall.function.name,
             args,
-            session.sessionKey
+            session
           );
 
           if (handoff) requiresHumanHandoff = true;

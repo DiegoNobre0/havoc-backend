@@ -289,7 +289,7 @@ async listarProdutos(termoBusca: string): Promise<string> {
       .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Tira acentos
       .toLowerCase();
 
-    // Dicionário de palavras inúteis expandido com termos de embalagens em inglês
+    // Dicionário de palavras inúteis
     const palavrasInuteis = [
       'preciso', 'quero', 'de', 'um', 'uma', 'gostaria', 'comprar', 'busco', 'ver', 'tem', 'sugestao',
       'promocao', 'promo', 'unidades', 'unidade', 'pack', 'com', 'x', 'para', 'o', 'a', 'e',
@@ -303,11 +303,11 @@ async listarProdutos(termoBusca: string): Promise<string> {
       return 'Por favor, seja mais específico no nome do produto.';
     }
 
-    // 👉 NOVO: Criação da Chave de Cache única baseada na busca (ex: "chatbot:busca:whey-isolado")
+    // 👉 Alterei levemente a chave de cache para não dar conflito com o cache antigo que tinha kits
     const searchKey = termos.join('-');
-    const cacheKey = `chatbot:busca:${searchKey}`;
+    const cacheKey = `chatbot:busca:isolada:${searchKey}`;
 
-    // 👉 NOVO: Tenta buscar no Redis O(1) antes de bater no banco
+    // Tenta buscar no Redis O(1) antes de bater no banco
     try {
       const cached = await redis.get(cacheKey);
       if (cached) {
@@ -322,33 +322,21 @@ async listarProdutos(termoBusca: string): Promise<string> {
       name: { contains: termo, mode: 'insensitive' as const }
     }));
 
-    // 2. BUSCA NOS PRODUTOS ISOLADOS
+    // 2. BUSCA EXCLUSIVA NOS PRODUTOS ISOLADOS (A Mágica da Limpeza)
     const products = await prisma.product.findMany({
       where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
+      take: 4, // 👈 TRAVA DE SEGURANÇA: Mostra no máximo 4 opções
       select: { name: true, price: true }
     });
 
-    // 3. BUSCA NOS KITS PROMOCIONAIS
-    const kits = await prisma.kit.findMany({
-      where: { isActive: true, AND: condicoesAND },
-      take: 3,
-      select: { name: true, finalPrice: true }
-    });
-
-    if (products.length === 0 && kits.length === 0) {
-      return `Não encontrei produtos ou kits exatamente para "${termoBusca}".`;
+    if (products.length === 0) {
+      return `Não encontrei produtos exatamente para "${termoBusca}".`;
     }
 
     let text = `Encontrei essas opções pra você 👇\n\n`;
     let contador = 1;
 
-    // Lista os Kits primeiro (se houver)
-    kits.forEach((k) => {
-      text += `*${contador}. ${k.name}*\n💰 R$ ${Number(k.finalPrice).toFixed(2)}\n\n`;
-      contador++;
-    });
-
-    // Depois lista os produtos isolados
+    // Lista apenas os produtos isolados
     products.forEach((p) => {
       text += `*${contador}. ${p.name}*\n💰 R$ ${Number(p.price).toFixed(2)}\n\n`;
       contador++;
@@ -356,7 +344,7 @@ async listarProdutos(termoBusca: string): Promise<string> {
 
     text += `_Qual desses te interessou? Me fala o nome do produto ou o número!_`;
 
-    // 👉 NOVO: Salva o resultado da busca no Redis por 30 minutos (1800 segundos)
+    // Salva o resultado da busca no Redis por 30 minutos (1800 segundos)
     try {
       await redis.set(cacheKey, text, 'EX', 1800);
     } catch (err) {
@@ -365,37 +353,8 @@ async listarProdutos(termoBusca: string): Promise<string> {
 
     return text;
   }
+
   async verDetalhesProduto(nomeProduto: string): Promise<string> {
-    let termoLimpo = nomeProduto
-      .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Tira acentos
-      .toLowerCase();
-    // let termoLimpo = nomeProduto
-    //   .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    //   .toLowerCase()
-    //   .replace(/creatina|creatine/g, 'creatin')
-    //   .replace(/proteina|protein/g, 'whey')
-    //   .replace(/termogenico|queimador|fat[- ]?burner/g, 'emagrecimento')
-    //   .replace(/combo/g, 'kit')
-    //   .replace(/pre[- ]?workout/g, 'treino')
-    //   .replace(/pre[- ]?treino/g, 'treino');
-
-    // Removemos a palavra "kit" daqui para usá-la como diferencial!
-    const palavrasInuteis = [
-      'promocao', 'promo', 'unidades', 'unidade', 'pack', 'de', 'com', 'x', 'para', 'o', 'a', 'e',
-      'powder', 'dietary', 'supplement', 'suplemento', 'flavor', 'sabor', 'nutrition', 'advanced', 'formula'
-    ];
-
- const termos = termoLimpo.split(' ').filter((t: string) => t.trim().length > 1 && !palavrasInuteis.includes(t) && isNaN(Number(t)));
-
-    if (termos.length === 0) return `O item "${nomeProduto}" não foi encontrado.`;
-
-    const condicoesAND = termos.map((termo: string) => ({
-      name: { contains: termo, mode: 'insensitive' as const }
-    }));
-
-    // Verifica se o cliente quer explicitamente um KIT
-    const buscandoKit = termos.includes('kit');
-
     // Função interna para formatar o Produto
     const formatarProduto = (p: any) => {
       let text = '';
@@ -418,20 +377,49 @@ async listarProdutos(termoBusca: string): Promise<string> {
       return text;
     };
 
+    // 👉 TENTATIVA 1: BUSCA EXATA (A Mágica da Velocidade)
+    // Como o cliente geralmente clica no botão ou digita o número, nós recebemos o nome exato do banco.
+    const produtoExato = await prisma.product.findFirst({
+      where: { name: { equals: nomeProduto.trim(), mode: 'insensitive' }, isActive: true, stock: { gt: 0 } }
+    });
+    if (produtoExato) return formatarProduto(produtoExato);
+
+    const kitExato = await prisma.kit.findFirst({
+      where: { name: { equals: nomeProduto.trim(), mode: 'insensitive' }, isActive: true },
+      include: { items: { include: { product: { select: { name: true } } } } }
+    });
+    if (kitExato) return formatarKit(kitExato);
+
+    // 👉 TENTATIVA 2: FALLBACK (Busca fragmentada caso o cliente tenha digitado só um pedaço na mão)
+    let termoLimpo = nomeProduto
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Tira acentos
+      .toLowerCase();
+
+    const palavrasInuteis = [
+      'promocao', 'promo', 'unidades', 'unidade', 'pack', 'de', 'com', 'x', 'para', 'o', 'a', 'e',
+      'powder', 'dietary', 'supplement', 'suplemento', 'flavor', 'sabor', 'nutrition', 'advanced', 'formula'
+    ];
+
+    const termos = termoLimpo.split(' ').filter((t: string) => t.trim().length > 1 && !palavrasInuteis.includes(t) && isNaN(Number(t)));
+
+    if (termos.length === 0) return `O item "${nomeProduto}" não foi encontrado.`;
+
+    const condicoesAND = termos.map((termo: string) => ({
+      name: { contains: termo, mode: 'insensitive' as const }
+    }));
+
+    const buscandoKit = termos.includes('kit');
+
     if (buscandoKit) {
-      // Prioridade 1: Procura no Kit
       const kitEncontrado = await prisma.kit.findFirst({ where: { isActive: true, AND: condicoesAND }, include: { items: { include: { product: { select: { name: true } } } } } });
       if (kitEncontrado) return formatarKit(kitEncontrado);
 
-      // Se não achou kit, tenta produto
       const prodEncontrado = await prisma.product.findFirst({ where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND } });
       if (prodEncontrado) return formatarProduto(prodEncontrado);
     } else {
-      // Prioridade 1: Procura no Produto
       const prodEncontrado = await prisma.product.findFirst({ where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND } });
       if (prodEncontrado) return formatarProduto(prodEncontrado);
 
-      // Se não achou produto, tenta kit
       const kitEncontrado = await prisma.kit.findFirst({ where: { isActive: true, AND: condicoesAND }, include: { items: { include: { product: { select: { name: true } } } } } });
       if (kitEncontrado) return formatarKit(kitEncontrado);
     }
