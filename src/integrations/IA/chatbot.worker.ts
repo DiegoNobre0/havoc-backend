@@ -269,14 +269,19 @@ Carrinho atual: ${carrinhoTexto}.
       }
 
       // ── Histórico + IA ───────────────────────────────────────
-      const history = await getHistory(sKey);
+     const history = await getHistory(sKey);
       await pushHistory(sKey, 'USER', textoFinal);
 
       if (io) {
         // Atualiza a tela de quem está com a conversa aberta
         io.to(`chat_${sKey}`).emit('new_message', { role: 'USER', content: textoFinal });
         // Atualiza a lista geral
-        io.to('all_chats').emit('chat_updated', { sessionKey: sKey, lastMessage: textoFinal, role: 'USER' });
+        io.to('all_chats').emit('chat_updated', { 
+            id: dbSession.id, // 🔥 FALTAVA ISSO AQUI!
+            sessionKey: sKey, 
+            lastMessage: textoFinal, 
+            role: 'USER' 
+        });
       }
 
       await prisma.chatMessage.create({
