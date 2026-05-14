@@ -14,12 +14,8 @@ export class ChatbotService {
     if (keys.length > 0) await redis.del(keys);
   }
 
-  // 1. Busca todas as sessões (com paginação e cache)
+// 1. Busca todas as sessões (em TEMPO REAL, sem cache para evitar fantasmas no F5)
   async findSessions(page: number, limit: number, search?: string, status?: string) {
-    const cacheKey = `${this.CACHE_PREFIX}page:${page}:limit:${limit}:search:${search || 'all'}`;
-    const cached = await redis.get(cacheKey);
-    if (cached) return JSON.parse(cached);
-
     const skip = (page - 1) * limit;
     const where: any = {};
 
@@ -38,7 +34,7 @@ export class ChatbotService {
         where,
         skip,
         take: limit,
-        orderBy: { updatedAt: 'desc' },
+        orderBy: { updatedAt: 'desc' }, // O mais recente sempre no topo
         include: {
           messages: {
             orderBy: { createdAt: 'desc' },
@@ -48,17 +44,11 @@ export class ChatbotService {
       })
     ]);
 
-    const result = {
+    return {
       data: sessions,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) }
     };
-
-    await redis.set(cacheKey, JSON.stringify(result), 'EX', 60); // Cache curto de 1 minuto para chat
-
-    return result;
-
   }
-
   // 2. Detalhes de uma sessão específica
   async findSessionById(id: string) {
     return prisma.chatSession.findUnique({ where: { id } });
