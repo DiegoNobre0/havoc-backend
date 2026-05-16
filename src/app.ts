@@ -32,7 +32,7 @@ app.setSerializerCompiler(serializerCompiler);
 
 app.setErrorHandler(errorHandler);
 
-await app.register(fastifyRateLimit, {
+app.register(fastifyRateLimit, {
     max: 100, // Limite global padrão: 100 requisições
     timeWindow: '1 minute', // a cada 1 minuto por IP
     redis: redis, // Salva a contagem no seu Redis!
