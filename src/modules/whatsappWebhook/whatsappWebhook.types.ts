@@ -16,8 +16,9 @@ export interface WebhookMessagePayload {
 export interface ParsedMessage {
   messageId: string;
   phone: string;
+  customerName: string; // ADICIONAR ISSO
   type: string;
-  content: string; 
-  raw_payload: WebhookMessagePayload;
+  content: string;
+  raw_payload: any;
 }
 

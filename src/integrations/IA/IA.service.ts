@@ -124,6 +124,45 @@ export class IAService {
         result = await this.contextHelper.cancelarAtendimento(sessionKey);
         // Aqui podemos resetar o carrinho no Redis também
         session.carrinho = [];
+      }     
+      else if (name === 'confirmar_recebimento_cliente') {
+        // 1. Busca o último pedido em andamento desse telefone
+        const ultimoPedido = await prisma.order.findFirst({
+          where: {
+            customerPhone: sessionKey,
+            status: { in: ['PENDING', 'PROCESSING', 'SHIPPED', 'CONFIRMED'] }
+          },
+          orderBy: { createdAt: 'desc' }
+        });
+
+        if (ultimoPedido) {
+          // 2. Atualiza o pedido para Entregue
+          await prisma.order.update({
+            where: { id: ultimoPedido.id },
+            data: { 
+              status: 'DELIVERED',
+              statusHistory: {
+                create: { status: 'DELIVERED', note: 'Entrega confirmada automaticamente pelo cliente via WhatsApp' }
+              }
+            }
+          });
+        }
+
+        // 3. Atualiza o status do Chat para Finalizado e devolve o controle pra IA
+        await prisma.chatSession.update({
+          where: { sessionKey },
+          data: { status: 'FINALIZADO', isActive: true }
+        });
+
+        // 4. Limpa a memória RAM/Redis do Chatbot (Garante o reset completo do carrinho)
+        const workerSessionKey = `chat:session:${sessionKey}`;
+        const workerHistoryKey = `chat:history:${sessionKey}`;
+        await redis.del(workerSessionKey);
+        await redis.del(workerHistoryKey);
+
+        console.log(`[Auto-Fulfillment] 📦 Pedido ${ultimoPedido?.code || 'N/A'} finalizado pelo cliente.`);
+        
+        result = "Ação concluída. O pedido foi marcado como entregue com sucesso e o chat foi arquivado. Agora, agradeça ao cliente com muito entusiasmo e deseje ótimos treinos!";
       }
       else {
         result = `Ferramenta "${name}" não reconhecida.`;
@@ -194,7 +233,7 @@ Exemplo de saída perfeita: 'Nuclear Rush Pre Treino Body Action' ou 'Kit Creati
 
   // ─── Geração de resposta principal ───
   async generateResponse(
-    session: { id: string; sessionKey: string },
+    session: { id: string; sessionKey: string; customerName?: string },
     userMessage: string,
     history: Array<{ role: string; content: string }>
   ): Promise<AIResponse> {
@@ -205,13 +244,24 @@ Exemplo de saída perfeita: 'Nuclear Rush Pre Treino Body Action' ou 'Kit Creati
     if (horaAtual >= 12 && horaAtual < 18) saudacao = 'Boa tarde';
     else if (horaAtual >= 18 || horaAtual < 5) saudacao = 'Boa noite';
 
-    // ─── 1. Saudação e Prompts ───
-const isPrimeiroContato = history.length === 0;
+    // 👉 2. Injetamos o nome do cliente caso ele exista
+    const isPrimeiroContato = history.length === 0;
+    
+    // Pega o primeiro nome, se existir, senão fica vazio
+    const primeiroNome = session.customerName 
+      ? session.customerName.split(' ')[0] 
+      : '';
+
+    // Se tivermos o nome, a Carol fala. Se não, ela é mais genérica.
+    const falaInicial = primeiroNome 
+      ? `"${saudacao}, ${primeiroNome}! Tudo bem? Me chamo Carol, sou consultora da Havoc Suplementos. Como posso te ajudar hoje?"`
+      : `"${saudacao}! Tudo bem? Me chamo Carol, sou consultora da Havoc Suplementos. Como posso te ajudar hoje?"`;
+
     const regraDeSaudacao = isPrimeiroContato
       ? `
         [REGRA DE ABORDAGEM INICIAL]
         Este é o PRIMEIRO contato do cliente com a loja. Apresente-se com ALTO ASTRAL.
-        Diga APENAS: "${saudacao}! Tudo bem? Me chamo Carol, sou consultora da Havoc Suplementos. Como posso te ajudar hoje?"
+        Diga APENAS: ${falaInicial}
         ⚠️ REGRA ESTRITA: PARE POR AÍ. Aguarde ele dizer o que precisa.
       `
       : `
@@ -245,6 +295,7 @@ Sua personalidade: Jovem, atlética, extremamente simpática, com alta energia e
 - Se o cliente pedir para tirar algo DO CARRINHO (ex: "tira o whey", "errei o produto"): Chame 'remover_item_carrinho'.
 - Se o cliente APENAS REJEITAR a lista (ex: "não quero essas", "nenhuma", "não gostei"): NÃO remova nada. Pergunte qual marca/sabor ele prefere ou chame 'listar_produtos' buscando alternativas.
 - Se o cliente disser "cancela tudo", "desisto": Chame 'cancelar_pedido_e_sessao'.
+- 🚀 CONFIRMAÇÃO DE ENTREGA (MUITO IMPORTANTE): Se o cliente mandar mensagem avisando que o produto chegou, que já recebeu ou agradecendo pela entrega (ex: "Chegou aqui!", "Acabei de receber, valeu", "O motoboy entregou"), chame IMEDIATAMENTE a ferramenta 'confirmar_recebimento_cliente'. Não faça perguntas extras, apenas execute a ferramenta e agradeça com muita energia desejando ótimos treinos!
 
 🚀 ATALHO MULTIMODAL E KITS:
 - Imagem: Se o sistema avisar que o cliente enviou uma foto, agradeça a foto, mas SEGURE A VENDA. Faça as Etapas 1 e 2 antes de dar os detalhes do produto da foto.
@@ -390,6 +441,14 @@ Use sua inteligência artificial para deduzir a raiz da palavra e envie APENAS e
         function: {
           name: 'cancelar_pedido_e_sessao',
           description: 'Cancela o pedido atual e limpa o carrinho caso o cliente desista da compra.',
+          parameters: { type: 'object', properties: {} },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'confirmar_recebimento_cliente',
+          description: 'Use esta ferramenta IMEDIATAMENTE quando o cliente confirmar de forma clara que o produto chegou, foi entregue ou que ele já está com ele em mãos (ex: "chegou", "já recebi", "foi entregue", "obrigado, acabei de receber"). Ela finaliza o pedido e o atendimento no sistema.',
           parameters: { type: 'object', properties: {} },
         },
       },

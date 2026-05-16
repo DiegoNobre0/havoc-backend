@@ -20,6 +20,7 @@ import { chatbotRoutes } from './modules/chatbot/chatbot.routes.js';
 import { shippingRoutes } from './modules/shipping/shipping.routes.js';
 import { paymentsRoutes } from './modules/payments/payments.routes.js';
 import { redis } from './shared/redis/redis.js';
+import { orderRoutes } from './modules/orders/orders.routes.js';
 
 export const app = fastify({
   loggerInstance: logger, 
@@ -107,3 +108,4 @@ app.register(whatsappWebhookRoutes, { prefix: '/webhook/whatsapp' });
 app.register(chatbotRoutes, { prefix: '/chatbot' })
 app.register(shippingRoutes, { prefix: '/shipping' });
 app.register(paymentsRoutes, { prefix: '/payments' });
+app.register(orderRoutes, { prefix: '/orders' });

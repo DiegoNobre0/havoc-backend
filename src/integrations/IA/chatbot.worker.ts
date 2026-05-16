@@ -45,7 +45,7 @@ console.log('🤖 [Worker] Inicializando Chatbot Worker...');
 export const chatbotWorker = new Worker(
   'whatsapp-queue',
   async (job) => {
-    const { sessionKey: sKey, message } = job.data;
+    const { sessionKey: sKey,customerName, message } = job.data;
 
     // ── Lock — garante ordem por cliente ─────────────────────
     const lKey = `lock:${sKey}`;
@@ -113,8 +113,8 @@ Visão identificou: "${descricao}".
       // 1. Garante que temos a sessão no banco para ver o status real
       let dbSession = await prisma.chatSession.upsert({
         where: { sessionKey: sKey },
-        create: { sessionKey: sKey, isActive: true, status: 'NOVO_ATENDIMENTO' },
-        update: {} // Só busca, não altera nada ainda
+        create: { sessionKey: sKey, customerName, isActive: true, status: 'NOVO_ATENDIMENTO' },
+        update: {customerName} // Só busca, não altera nada ainda
       });
 
       // 2. Se estava morta (Finalizada/Cancelada), nós reabrimos!
@@ -150,8 +150,8 @@ Visão identificou: "${descricao}".
         // 2. Salva a mensagem no banco de dados para o histórico do painel
         await prisma.chatSession.upsert({
           where: { sessionKey: sKey },
-          create: { sessionKey: sKey, isActive: false },
-          update: {},
+          create: { sessionKey: sKey, customerName, isActive: false },
+          update: {customerName},
         }).then((dbSession) =>
           prisma.chatMessage.create({
             data: {
@@ -165,9 +165,7 @@ Visão identificou: "${descricao}".
         
     
         return;
-      }
-
-      
+      }     
 
 
       // No worker, ANTES de chamar a IA, adicione este interceptador:
@@ -272,14 +270,12 @@ Carrinho atual: ${carrinhoTexto}.
      const history = await getHistory(sKey);
       await pushHistory(sKey, 'USER', textoFinal);
 
-      if (io) {
-        // Atualiza a tela de quem está com a conversa aberta
-        io.to(`chat_${sKey}`).emit('new_message', { role: 'USER', content: textoFinal });
-        // Atualiza a lista geral
+      if (io) {       
+        io.to(`chat_${sKey}`).emit('new_message', { role: 'USER', content: textoParaHistorico });
         io.to('all_chats').emit('chat_updated', { 
-            id: dbSession.id, // 🔥 FALTAVA ISSO AQUI!
+            id: dbSession.id, 
             sessionKey: sKey, 
-            lastMessage: textoFinal, 
+            lastMessage: textoParaHistorico, 
             role: 'USER' 
         });
       }
@@ -304,8 +300,8 @@ Carrinho atual: ${carrinhoTexto}.
 
         await prisma.chatSession.upsert({
           where: { sessionKey: sKey },
-          create: { sessionKey: sKey, isActive: false, handoffRequestedAt: new Date() },
-          update: { isActive: false, handoffRequestedAt: new Date() },
+          create: { sessionKey: sKey,customerName, isActive: false, handoffRequestedAt: new Date() },
+          update: {  isActive: false, customerName, handoffRequestedAt: new Date() },
         });
 
         
@@ -335,22 +331,27 @@ Carrinho atual: ${carrinhoTexto}.
         const confirmMatch = aiResponse.content.match(/\[CONFIRM:(.*?)\]/);
         const productName = confirmMatch?.[1] ?? null;
 
-        // 1. Mudamos a regex para adicionar o 'i' (case insensitive, caso a IA escreva [Sugestao:...])
-        const sugestaoMatch = aiResponse.content.match(/\[SUGESTAO:(.*?)\]/i);
+       // 1. Regex à prova de erros (pega SUGESTAO com 1 ou 2 G's)
+        const sugestaoMatch = aiResponse.content.match(/\[SUG+ESTAO:(.*?)\]/i);
 
-        // 2. Mudamos o fallback para vazio '' (MUITO IMPORTANTE)
-        const produtoSugerido = sugestaoMatch ? sugestaoMatch[1].trim() : '';
+        // 2. Extrai o produto
+        let produtoSugerido = sugestaoMatch ? sugestaoMatch[1].trim() : '';
+        // Se a IA colocar um ponto e vírgula no final da tag por engano, nós limpamos
+        produtoSugerido = produtoSugerido.replace(';', '').trim();
 
         const pixMatch = aiResponse.content.match(/\[PIX:(.*?)\]/i);
         const pixCode = pixMatch ? pixMatch[1].trim() : null;
 
         console.log(`[DEBUG TAG] Produto Sugerido Extraído: "${produtoSugerido}"`);
 
+        // 👉 LIMPANDO TUDO DA TELA DO CLIENTE
         let finalContent = aiResponse.content
           .replace(imgRegex, '')
           .replace(confirmTagParaLimpar, '')
           .replace(toolTagRegex, '')
-          .replace(/\[SUGESTAO:(.*?)\]/gi, '')
+          .replace(/\[SUGESTAO:(.*?)\]/gi, '')   // Limpa o normal
+          .replace(/\[SUGGESTAO:(.*?)\]/gi, '')  // Limpa o erro de ortografia da IA
+          .replace(/;/g, '') // Remove possíveis pontos e vírgulas perdidos pela IA
           .replace(/\[PIX:(.*?)\]/gi, '')
           .trim();
 
@@ -375,8 +376,8 @@ Carrinho atual: ${carrinhoTexto}.
      // Persiste a resposta da IA no Prisma em background...
         prisma.chatSession.upsert({
           where: { sessionKey: sKey },
-          create: { sessionKey: sKey, isActive: true },
-          update: { updatedAt: new Date() }, // Atualiza a hora da sessão
+          create: { sessionKey: sKey,customerName, isActive: true },
+          update: { customerName, updatedAt: new Date() }, // Atualiza a hora da sessão
         }).then((sessaoAtualizada) =>
           
           // 👉 CORREÇÃO 2: Cria apenas a mensagem da IA, pois a do cliente já foi salva!

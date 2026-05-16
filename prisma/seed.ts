@@ -1,4 +1,7 @@
 import { PrismaClient, OrderStatus } from '@prisma/client';
+import { hash } from 'bcryptjs';
+
+
 
 const prisma = new PrismaClient();
 
@@ -7,6 +10,14 @@ function getRandomDate(daysBack: number) {
   date.setDate(date.getDate() - Math.floor(Math.random() * daysBack));
   date.setHours(Math.floor(Math.random() * 24), Math.floor(Math.random() * 60));
   return date;
+}
+
+// Lista de nomes e telefones falsos para deixar o Seed mais realista
+const fakeNames = ['João Silva', 'Maria Oliveira', 'Carlos Santos', 'Ana Costa', 'Pedro Souza', 'Lucas Almeida', 'Juliana Lima', 'Fernanda Alves'];
+function getRandomClient() {
+  const name = fakeNames[Math.floor(Math.random() * fakeNames.length)];
+  const phone = `55719${Math.floor(10000000 + Math.random() * 90000000)}`; // Gera um número aleatório (Ex: 5571988887777)
+  return { name, phone };
 }
 
 async function main() {
@@ -22,11 +33,21 @@ async function main() {
   await prisma.product.deleteMany();
   await prisma.category.deleteMany();
 
-  const existingUser = await prisma.user.findFirst();
-  if (!existingUser) {
-    console.error('❌ ERRO: Nenhum usuário encontrado. Crie um usuário no banco primeiro.');
-    return;
-  }
+  console.log('👤 Garantindo usuário de teste...');
+
+const hashedPassword = await hash('123456', 12);
+
+  const testUser = await prisma.user.upsert({
+    where: { email: 'cliente@teste.com' },
+    update: {},
+    create: {
+      name: 'Operador Havoc',
+      email: 'cliente@teste.com',
+      password: hashedPassword,
+      role: 'ADMIN', // ou OPERADOR, dependendo dos seus Enums
+      isActive: true
+    }
+  });
 
   console.log('📦 Criando categorias...');
   const cat = {
@@ -398,12 +419,19 @@ async function main() {
       return { productId: p.id, quantity: q, unitPrice: price, totalPrice: price * q };
     });
 
+    const client = getRandomClient();
+
     await prisma.order.create({
       data: {
         code: `HAV-${40000 + i}`,
         status: statuses[Math.floor(Math.random() * statuses.length)],
-        subtotal, shippingCost: 15.90, total: subtotal + 15.90,
-        userId: existingUser.id,
+        subtotal, 
+        shippingCost: 15.90, 
+        total: subtotal + 15.90,
+        // 👉 NOVO: Adicionado os dados do cliente (campos que criamos antes)
+        customerName: client.name,
+        customerPhone: client.phone,
+        userId: testUser.id, // Opcional, atrelando ao testUser criado lá no topo
         createdAt: getRandomDate(30),
         items: { create: itemsData }
       }

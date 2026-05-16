@@ -28,7 +28,7 @@ export class WhatsAppWebhookService {
     );
   }
 
-  // ─── 2. Fluxo Principal ────────────────────────────────────
+ // ─── 2. Fluxo Principal ────────────────────────────────────
   async processWebhook(body: any) {
     try {
       const entry = body.entry?.[0];
@@ -37,6 +37,10 @@ export class WhatsAppWebhookService {
       const messageData = value?.messages?.[0] as WebhookMessagePayload;
       const statusesData = value?.statuses?.[0];
       const businessPhoneNumber = value?.metadata?.display_phone_number;
+
+      // 👉 EXTRAINDO O NOME DO CLIENTE DO PAYLOAD DA META
+      const contactData = value?.contacts?.[0];
+      const customerName = contactData?.profile?.name || 'Cliente';
 
       // Ignora eventos de status (lido/entregue)
       if (statusesData) return;
@@ -51,8 +55,8 @@ export class WhatsAppWebhookService {
         return;
       }
 
-      const parsedMessage = this.parseMessage(messageData);
-
+      // Adicionamos o nome como parâmetro na função de parser
+      const parsedMessage = this.parseMessage(messageData, customerName);
 
       // Detecta clique em botão interativo
       const interactiveData: any = messageData?.interactive;
@@ -69,6 +73,7 @@ export class WhatsAppWebhookService {
 
         await whatsappQueue.add('process-chat-message', {
           sessionKey: parsedMessage.phone,
+          customerName: parsedMessage.customerName, // 👉 Nome indo pra fila!
           message: {
             ...parsedMessage,
             type: 'text',
@@ -76,16 +81,18 @@ export class WhatsAppWebhookService {
               ? `[PRODUTO_CONFIRMADO] ${buttonId.replace('CONFIRM_YES:', '')}`
               : buttonId.startsWith('CONFIRM_CHECKOUT')
               ? '[FINALIZAR_PEDIDO] Cliente quer finalizar agora.'
-              : buttonId.startsWith('VER_SUGESTAO_') // 👉 NOVO AQUI
+              : buttonId.startsWith('VER_SUGESTAO_')
                 ? `[VER_SUGESTAO] ${buttonId.replace('VER_SUGESTAO_', '')}`
                 : 'Quero ver outras opções',
           },
         });
         return;
       }
+
       // Mensagem normal → fila
       await whatsappQueue.add('process-chat-message', {
         sessionKey: parsedMessage.phone,
+        customerName: parsedMessage.customerName, // 👉 Nome indo pra fila!
         message: parsedMessage,
       });
 
@@ -95,7 +102,8 @@ export class WhatsAppWebhookService {
   }
 
   // ─── 3. Parser Universal ───────────────────────────────────
-  private parseMessage(msg: WebhookMessagePayload): ParsedMessage {
+  // Recebe o nome e adiciona no retorno
+  private parseMessage(msg: WebhookMessagePayload, customerName: string): ParsedMessage {
     const cleanPhone = msg.from.replace(/\D/g, '');
 
     let content = '';
@@ -125,6 +133,7 @@ export class WhatsAppWebhookService {
     return {
       messageId: msg.id,
       phone: cleanPhone,
+      customerName, // 👉 Retorna o nome aqui
       type: msg.type,
       content,
       raw_payload: msg,

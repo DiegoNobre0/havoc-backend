@@ -1,6 +1,7 @@
 import { prisma } from '../../database/prisma.js';
 import { PaymentsService } from '../../modules/payments/payments.service.js';
 import { redis } from '../../shared/redis/redis.js';
+import { io } from '../../shared/socket/socket.js';
 
 export class ChatbotContext {
 
@@ -37,9 +38,9 @@ export class ChatbotContext {
   }
 
   // 2. Busca os Kits Promocionais ativos
-async getPromoKitsContext(): Promise<string> {
+  async getPromoKitsContext(): Promise<string> {
     const cacheKey = 'chatbot:catalogo:kits_promocionais';
-    
+
     // 1. Tenta buscar no Redis O(1)
     const cached = await redis.get(cacheKey);
     if (cached) {
@@ -129,7 +130,7 @@ async getPromoKitsContext(): Promise<string> {
         text += `[IMG:${(p as any).imageUrl}]\n`;
       }
       text += `📦 *${p.name}*\n`;
-      text += `💰 Valor: R$ ${Number(p.price).toFixed(2)}\n`;      
+      text += `💰 Valor: R$ ${Number(p.price).toFixed(2)}\n`;
       text += `\n`;
     }
 
@@ -138,12 +139,13 @@ async getPromoKitsContext(): Promise<string> {
 
   async gerarCheckout(sessionKey: string, dadosCheckout: any): Promise<string> {
     try {
-      // 1. Busca o usuário dono desse telefone, ou cria um na hora
-      let user = await prisma.user.findFirst({ /* lógica para achar o user pelo telefone da sessionKey */ });
+      // 1. Busca o nome do cliente que foi capturado na sessão do Chatbot
+      const chatSession = await prisma.chatSession.findUnique({
+        where: { sessionKey }
+      });
 
-      // if (!user) {
-      //   user = await prisma.user.findFirst(); 
-      // }
+      const customerName = chatSession?.customerName || 'Cliente WhatsApp';
+      const customerPhone = sessionKey; // O número do WhatsApp é a própria sessionKey
 
       let subtotal = 0;
       const orderItemsData = [];
@@ -151,18 +153,22 @@ async getPromoKitsContext(): Promise<string> {
 
       // 2. Itera sobre os produtos/kits que a IA enviou
       for (const item of dadosCheckout.produtos) {
+        
+        // 👉 A BLINDAGEM: Tenta pegar 'quantidade', se vier 'quantity' ele pega também, se vier vazio, assume 1.
+        const qtd = Number(item.quantidade || item.quantity || 1);
+
         // --- TENTATIVA 1: É UM PRODUTO ISOLADO? ---
         const produtoBanco = await prisma.product.findFirst({
           where: { name: { contains: item.nome_produto, mode: 'insensitive' } }
         });
 
         if (produtoBanco) {
-          const itemTotal = Number(produtoBanco.price) * item.quantidade;
+          const itemTotal = Number(produtoBanco.price) * qtd;
           subtotal += itemTotal;
 
           orderItemsData.push({
             productId: produtoBanco.id,
-            quantity: item.quantidade,
+            quantity: qtd, // Usa a variável blindada
             unitPrice: produtoBanco.price,
             totalPrice: itemTotal,
           });
@@ -176,13 +182,13 @@ async getPromoKitsContext(): Promise<string> {
         });
 
         if (kitBanco) {
-          const itemTotal = Number(kitBanco.finalPrice) * item.quantidade;
+          const itemTotal = Number(kitBanco.finalPrice) * qtd;
           subtotal += itemTotal;
 
           for (const kitItem of kitBanco.items) {
             orderItemsData.push({
               productId: kitItem.productId,
-              quantity: kitItem.quantity * item.quantidade,
+              quantity: kitItem.quantity * qtd, // Usa a variável blindada
               unitPrice: 0,
               totalPrice: 0,
             });
@@ -197,20 +203,23 @@ async getPromoKitsContext(): Promise<string> {
         return `Tivemos um problema para validar os seguintes itens no estoque: ${itensNaoEncontrados.join(', ')}. Peça desculpas e peça para o cliente confirmar os nomes exatos.`;
       }
 
-      // 3. Calcula Frete Fixo
+      // 3. Calcula Frete Fixo e define o endereço completo
       const frete = dadosCheckout.metodo_entrega === 'ENTREGA' ? 15.00 : 0.00;
       const total = subtotal + frete;
+      const deliveryAddress = dadosCheckout.metodo_entrega === 'ENTREGA' ? dadosCheckout.endereco_ou_cep : null;
 
-      // 4. CRIA O PEDIDO NO BANCO
+      // 4. CRIA O PEDIDO NO BANCO COM OS NOVOS CAMPOS DO CLIENTE E ENDEREÇO
       const novoPedido = await prisma.order.create({
         data: {
-          code: `HAV-${Math.floor(Math.random() * 10000)}`,
-          userId: user!.id,
+          code: `HAV-${Math.floor(10000 + Math.random() * 90000)}`,
           status: 'PENDING',
+          customerName,
+          customerPhone,
+          deliveryAddress, 
           subtotal,
           shippingCost: frete,
           total,
-          notes: `Entrega: ${dadosCheckout.metodo_entrega} | Endereço: ${dadosCheckout.endereco_ou_cep || 'N/A'}\n*Atenção*: Se houver itens com valor zero, eles fazem parte de um Kit Promocional.`,
+          notes: dadosCheckout.notes || null,          
           items: {
             create: orderItemsData
           },
@@ -220,23 +229,21 @@ async getPromoKitsContext(): Promise<string> {
         }
       });
 
-      // 🔥 5. INTEGRAÇÃO MERCADO PAGO: Gera a cobrança na hora 🔥
-      const paymentsService = new PaymentsService();
+      // 🔥 5. INTEGRAÇÃO MERCADO PAGO / SICREDI: Desativada temporariamente para testes 🔥
       let pixCopiaECola = '';
       let linkPagamento = '';
 
       if (dadosCheckout.metodo_pagamento === 'PIX') {
-        const pixData = await paymentsService.generatePix(
-          novoPedido.id,
-          'cliente@havoc.com.br', // E-mail obrigatório do MP
-          'Cliente Havoc'         // Nome obrigatório do MP
-        );
-        // 👇 Pega o código gerado pelo Mercado Pago
-        pixCopiaECola = pixData.pixCode || '';
+        // Quando for plugar o banco de verdade, você desabrocha esse código:
+        // const paymentsService = new PaymentsService();
+        // const pixData = await paymentsService.generatePix(novoPedido.id, 'cliente@havoc.com.br', customerName);
+        // pixCopiaECola = pixData.pixCode || '';
+        pixCopiaECola = '00020126580014br.gov.bcb.pix... (Pix Fictício de Teste)';
 
       } else if (dadosCheckout.metodo_pagamento === 'CARTAO') {
-        const linkData = await paymentsService.generateLink(novoPedido.id);
-        linkPagamento = linkData.paymentLink || '';
+        // const linkData = await paymentsService.generateLink(novoPedido.id);
+        // linkPagamento = linkData.paymentLink || '';
+        linkPagamento = 'https://mpago.la/link-ficticio-teste';
       }
 
       // 6. DEVOLVE O TEXTO PRONTO PARA A IA MANDAR PRO CLIENTE
@@ -244,7 +251,9 @@ async getPromoKitsContext(): Promise<string> {
       textoResposta += `*Resumo da Compra:*\n`;
 
       dadosCheckout.produtos.forEach((p: any) => {
-        textoResposta += `- ${p.quantidade}x ${p.nome_produto}\n`;
+        // Protege também na hora de imprimir no WhatsApp
+        const printQtd = p.quantidade || p.quantity || 1;
+        textoResposta += `- ${printQtd}x ${p.nome_produto}\n`;
       });
 
       textoResposta += `\nSubtotal: R$ ${subtotal.toFixed(2)}`;
@@ -253,28 +262,41 @@ async getPromoKitsContext(): Promise<string> {
 
       // 7. INJETA O QR CODE E AS INSTRUÇÕES DE PAGAMENTO NO FINAL
       if (dadosCheckout.metodo_pagamento === 'PIX') {
-
-        if (pixCopiaECola) {
-          const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(pixCopiaECola)}`;
-          textoResposta = `[IMG:${qrCodeUrl}]\n` + textoResposta;
-          // Injeta a tag mágica do PIX
-          textoResposta += `\n[PIX:${pixCopiaECola}]`;
-        }
-
         textoResposta += `👇 *PAGAMENTO VIA PIX* 👇\n`;
-        textoResposta += `Para pagar, escaneie o *QR Code* da imagem acima ou copie o código abaixo.\n`;
-        textoResposta += `_(Enviamos o código copia-e-cola em uma mensagem separada para facilitar para você!)_\n\n`;
+        textoResposta += `Utilize a chave copia-e-cola abaixo para finalizar:\n\n`;
+        textoResposta += `[PIX:${pixCopiaECola}]\n\n`;
         textoResposta += `Assim que o pagamento for aprovado, nosso sistema confirma tudo automaticamente por aqui! 🚀`;
 
       } else if (dadosCheckout.metodo_pagamento === 'CARTAO') {
         textoResposta += `💳 *PAGAMENTO NO CARTÃO* 💳\n`;
-        textoResposta += `Acesse seu link seguro do Mercado Pago para finalizar a compra em até 12x:\n\n`;
+        textoResposta += `Acesse seu link seguro para finalizar a compra em até 12x:\n\n`;
         textoResposta += `${linkPagamento}\n\n`;
         textoResposta += `Após o pagamento, seu pedido será confirmado automaticamente! 🚀`;
       } else {
-        textoResposta += `💵 Pagamento em dinheiro selecionado. Deixe o valor separado para entregar ao motoboy (ou no balcão). Precisa de troco?`;
+        textoResposta += `💵 Pagamento em dinheiro selecionado. Deixe o valor separado para entregar ao motoboy. Precisa de troco?`;
       }
 
+      // 🔥 8. MODO DE TESTE: DISPARA A IMPRESSORA IMEDIATAMENTE 🔥
+      try {
+        if (io) {
+          const cupom = {
+            codigo: novoPedido.code,
+            cliente: customerName,
+            telefone: customerPhone,
+            endereco: deliveryAddress || '>>> RETIRADA BALCÃO <<<',
+            itens: dadosCheckout.produtos.map((p: any) => `${p.quantidade || p.quantity || 1}x ${p.nome_produto}`),
+            total: total,
+            data: new Date().toLocaleString('pt-BR')
+          };
+
+          io.emit('imprimir_cupom', cupom);
+          console.log(`[Teste Impressão] 🖨️ Ordem enviada para a impressora: Pedido ${novoPedido.code}`);
+        }
+      } catch (printError) {
+        console.error('[Erro no teste de impressão]:', printError);
+      }
+
+      // 9. Retorna o texto para a Carol
       return textoResposta;
 
     } catch (error) {
@@ -283,7 +305,7 @@ async getPromoKitsContext(): Promise<string> {
     }
   }
 
-async listarProdutos(termoBusca: string): Promise<string> {
+  async listarProdutos(termoBusca: string): Promise<string> {
     // 1. Limpeza inteligente e Tradução Universal de Suplementos
     let termoLimpo = termoBusca
       .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Tira acentos
@@ -464,7 +486,7 @@ async listarProdutos(termoBusca: string): Promise<string> {
     }
 
     // Filtra o carrinho removendo o item (busca por aproximação simples)
-    const novoCarrinho = session.carrinho.filter((item: string) => 
+    const novoCarrinho = session.carrinho.filter((item: string) =>
       !item.toLowerCase().includes(nomeProduto.toLowerCase())
     );
 
@@ -474,7 +496,7 @@ async listarProdutos(termoBusca: string): Promise<string> {
 
     session.carrinho = novoCarrinho;
     // O saveSession será feito pelo worker após a execução da tool
-    
+
     if (novoCarrinho.length === 0) {
       return `Prontinho! Removi o item. Seu carrinho agora está vazio.`;
     }
@@ -486,9 +508,9 @@ async listarProdutos(termoBusca: string): Promise<string> {
     try {
       // 1. Procura se existe um pedido PENDENTE no banco para esse cliente
       const order = await prisma.order.findFirst({
-        where: { 
+        where: {
           user: { chatSessions: { some: { sessionKey } } },
-          status: 'PENDING' 
+          status: 'PENDING'
         },
         orderBy: { createdAt: 'desc' }
       });

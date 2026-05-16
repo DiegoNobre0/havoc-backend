@@ -14,14 +14,18 @@ export class ChatbotService {
     if (keys.length > 0) await redis.del(keys);
   }
 
-// 1. Busca todas as sessões (em TEMPO REAL, sem cache para evitar fantasmas no F5)
+
+  // 1. Busca todas as sessões (em TEMPO REAL, sem cache para evitar fantasmas no F5)
   async findSessions(page: number, limit: number, search?: string, status?: string) {
     const skip = (page - 1) * limit;
     const where: any = {};
 
-    // Se houver busca, procura pelo número de telefone (sessionKey)
+   
     if (search) {
-      where.sessionKey = { contains: search };
+      where.OR = [
+        { sessionKey: { contains: search } },
+        { customerName: { contains: search, mode: 'insensitive' } } // mode insensitive ignora maiúsculas/minúsculas
+      ];
     }
 
     if (status) {
@@ -155,7 +159,7 @@ async toggleStatus(id: string, isActive: boolean) {
       where: { sessionKey },
       data: { 
         status,
-        // 👉 SEGREDO: Se finalizou ou cancelou, devolvemos o controle pra IA automaticamente
+       
         ...(status === 'FINALIZADO' || status === 'CANCELADO' ? { isActive: true } : {}) 
       }
     });

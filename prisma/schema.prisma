@@ -178,11 +178,17 @@ model KitItem {
 // ============================================================
 // PEDIDOS
 // ============================================================
-
 model Order {
   id           String      @id @default(uuid())
   code         String      @unique // ex: HAV-00001
   status       OrderStatus @default(PENDING)
+  
+  // 👉 ADICIONE ESTES CAMPOS (Dados cruciais do cliente)
+  customerName  String
+  customerPhone String
+  customerCpf   String?    // Opcional, útil para PIX/Nota Fiscal
+  deliveryAddress String?
+  
   subtotal     Decimal     @db.Decimal(10, 2)
   shippingCost Decimal     @default(0) @db.Decimal(10, 2)
   discount     Decimal     @default(0) @db.Decimal(10, 2)
@@ -192,8 +198,9 @@ model Order {
   updatedAt    DateTime    @updatedAt
   deletedAt    DateTime?
 
-  userId String
-  user   User   @relation(fields: [userId], references: [id])
+  // 👉 Deixe opcional: Representa qual funcionário ajudou neste pedido (se houver)
+  userId       String?
+  user         User?       @relation(fields: [userId], references: [id])
 
   shippingRuleId String?
   shippingRule   ShippingRule? @relation(fields: [shippingRuleId], references: [id])
@@ -205,6 +212,7 @@ model Order {
   @@index([userId])
   @@index([status])
   @@index([code])
+  @@index([customerPhone]) // Bom para buscas rápidas
   @@index([createdAt])
   @@map("orders")
 }
@@ -277,6 +285,7 @@ model Payment {
 model ChatSession {
   id                 String    @id @default(uuid())
   sessionKey         String    @unique @default(uuid())
+  customerName       String?
   isActive           Boolean   @default(false)
   status             ChatSessionStatus @default(NOVO_ATENDIMENTO)
   createdAt          DateTime  @default(now())

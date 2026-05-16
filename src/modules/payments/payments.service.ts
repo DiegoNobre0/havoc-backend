@@ -151,7 +151,7 @@ export class PaymentsService {
   }
 
   // ==============================================================
-  // 👉 3. PROCESSAR WEBHOOK (EXCLUSIVO SICREDI)
+  // 👉 3. PROCESSAR WEBHOOK E DISPARAR IMPRESSORA DA LOJA
   // ==============================================================
   async processWebhook(body: any) {
     // O padrão do Banco Central (Sicredi incluído) envia um array "pix"
@@ -174,18 +174,41 @@ export class PaymentsService {
         }
       });
 
-      // 2. Atualiza Pedido
-      await prisma.order.update({
+      // 2. Atualiza Pedido E TRÁS OS DADOS PARA O CUPOM
+      const updatedOrder = await prisma.order.update({
         where: { id: payment.orderId },
-        data: { status: 'CONFIRMED' }
+        data: { status: 'CONFIRMED' },
+        include: {
+          items: {
+            include: {
+              product: { select: { name: true } },
+              kit: { select: { name: true } }
+            }
+          }
+        }
       });
 
-      // 3. Notifica via Socket
+      // 3. Notificações via Socket
       if (io) {
+        // -> Avisa a tela do cliente (se ele estiver acompanhando via web)
         io.to(`order_${payment.orderId}`).emit('payment_confirmed', {
           orderId: payment.orderId,
           status: 'PAID'
         });
+
+        // 🔥 4. A MÁGICA DA IMPRESSORA: Monta o cupom e envia para a loja 🔥
+        const cupom = {
+          codigo: updatedOrder.code,
+          cliente: updatedOrder.customerName,
+          telefone: updatedOrder.customerPhone,
+          endereco: updatedOrder.deliveryAddress || '>>> RETIRADA BALCÃO <<<',
+          itens: updatedOrder.items.map(i => `${i.quantity}x ${i.product?.name || i.kit?.name}`),
+          total: updatedOrder.total,
+          data: new Date().toLocaleString('pt-BR')
+        };
+
+        io.to('loja_fisica').emit('imprimir_cupom', cupom);
+        console.log(`[Impressão] 🖨️ Ordem enviada para a loja: Pedido ${updatedOrder.code}`);
       }
     }
   }
