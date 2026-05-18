@@ -118,13 +118,13 @@ export class IAService {
         result = resultText + '\n\n⚠️ [INSTRUÇÃO DO SISTEMA]: Copie e apresente os kits promocionais acima para o cliente com muita energia. NUNCA invente combos. Após mostrar, pergunte qual combo ele quer garantir!';
       }
       else if (name === 'remover_item_carrinho') {
-       result = await this.contextHelper.removerProdutoDoCarrinho(session, args.nome_produto);
+        result = await this.contextHelper.removerProdutoDoCarrinho(session, args.nome_produto);
       }
       else if (name === 'cancelar_pedido_e_sessao') {
         result = await this.contextHelper.cancelarAtendimento(sessionKey);
         // Aqui podemos resetar o carrinho no Redis também
         session.carrinho = [];
-      }     
+      }
       else if (name === 'confirmar_recebimento_cliente') {
         // 1. Busca o último pedido em andamento desse telefone
         const ultimoPedido = await prisma.order.findFirst({
@@ -139,7 +139,7 @@ export class IAService {
           // 2. Atualiza o pedido para Entregue
           await prisma.order.update({
             where: { id: ultimoPedido.id },
-            data: { 
+            data: {
               status: 'DELIVERED',
               statusHistory: {
                 create: { status: 'DELIVERED', note: 'Entrega confirmada automaticamente pelo cliente via WhatsApp' }
@@ -161,7 +161,7 @@ export class IAService {
         await redis.del(workerHistoryKey);
 
         console.log(`[Auto-Fulfillment] 📦 Pedido ${ultimoPedido?.code || 'N/A'} finalizado pelo cliente.`);
-        
+
         result = "Ação concluída. O pedido foi marcado como entregue com sucesso e o chat foi arquivado. Agora, agradeça ao cliente com muito entusiasmo e deseje ótimos treinos!";
       }
       else {
@@ -246,14 +246,14 @@ Exemplo de saída perfeita: 'Nuclear Rush Pre Treino Body Action' ou 'Kit Creati
 
     // 👉 2. Injetamos o nome do cliente caso ele exista
     const isPrimeiroContato = history.length === 0;
-    
+
     // Pega o primeiro nome, se existir, senão fica vazio
-    const primeiroNome = session.customerName 
-      ? session.customerName.split(' ')[0] 
+    const primeiroNome = session.customerName
+      ? session.customerName.split(' ')[0]
       : '';
 
     // Se tivermos o nome, a Carol fala. Se não, ela é mais genérica.
-    const falaInicial = primeiroNome 
+    const falaInicial = primeiroNome
       ? `"${saudacao}, ${primeiroNome}! Tudo bem? Me chamo Carol, sou consultora da Havoc Suplementos. Como posso te ajudar hoje?"`
       : `"${saudacao}! Tudo bem? Me chamo Carol, sou consultora da Havoc Suplementos. Como posso te ajudar hoje?"`;
 
@@ -314,7 +314,7 @@ Assim que ele responder o objetivo, descubra o nível dele.
 
 ETAPA 3 — APRESENTAÇÃO (PROTOCOLOS ESPECÍFICOS):
 Agora sim você mostra os produtos, dependendo da resposta da Etapa 2:
-- PROTOCOLO EXPERIENTE (já usa): "Massa! Você tem preferência por alguma marca (tipo Black Skull, Dux) ou quer que eu te mostre nossas opções?" -> Após ele responder, chame a ferramenta 'listar_produtos'.
+- PROTOCOLO EXPERIENTE (já usa): "Massa! Você tem preferência por alguma marca (tipo Black Skull, Dux) ou quer que eu te mostre nossas opções?" -> Após ele responder, chame a ferramenta 'listar_produtos' COMBINANDO o tipo de produto que o cliente quer com a marca informada. (Ex: se ele quer massa magra/proteína e escolheu a marca, busque por "whey black skull").
 - PROTOCOLO INICIANTE (vai começar): Diga APENAS: "Para começar certo, o ideal é: 💪 Whey, ⚡ Creatina e 🔄 BCAA. Posso te mostrar as opções?" -> Se ele responder "Sim", chame 'listar_produtos' APENAS para o produto principal que ele pediu lá no início (ex: "whey").
 
 ETAPA 4 — DETALHES E BOTÕES (Gatilho de Compra):
@@ -362,19 +362,17 @@ Siga este fluxo EXATAMENTE nesta ordem de Passos:
       //     },
       //   },
       // },
-   {
+      {
         type: 'function',
         function: {
           name: 'listar_produtos',
           description: `Busca produtos e acessórios no banco de dados. 
-⚠️ REGRA DE OURO DA BUSCA (RAIZ DA PALAVRA):
-Nosso banco de dados mistura rótulos em Inglês e Português (ex: "Creatina" e "Creatine"). Para a busca não falhar, você DEVE enviar apenas o RADICAL/RAIZ da palavra principal.
-- Se o cliente pedir Creatina ou Creatine -> envie APENAS 'creatin'.
-- Se pedir Glutamina ou Glutamine -> envie APENAS 'glutamin'.
-- Se pedir Proteína -> envie 'whey' ou 'protein'.
-- Se pedir Pré-treino ou Pre workout -> envie 'treino' ou 'workout'.
-- Se pedir marca (Integral, Black Skull) -> envie o nome da marca.
-Use sua inteligência artificial para deduzir a raiz da palavra e envie APENAS ela.`,
+⚠️ REGRA DE OURO DA BUSCA (CONTEXTO + MARCA):
+Você DEVE combinar o tipo de produto que o cliente deseja com a marca ou característica solicitada para a busca ser cirúrgica.
+- Se o cliente quer Massa Magra/Proteína e pediu a marca Black Skull -> o termo_busca DEVE ser 'whey black skull'.
+- Se o cliente quer Creatina e pediu Dux -> envie 'creatin dux'.
+- Se pedir Pré-treino -> envie 'treino'.
+NUNCA envie apenas a marca se você já sabe qual objetivo ou produto o cliente quer. Use as palavras principais separadas por espaço.`,
           parameters: {
             type: 'object',
             properties: { termo_busca: { type: 'string' } },

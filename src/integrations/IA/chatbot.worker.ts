@@ -45,7 +45,7 @@ console.log('🤖 [Worker] Inicializando Chatbot Worker...');
 export const chatbotWorker = new Worker(
   'whatsapp-queue',
   async (job) => {
-    const { sessionKey: sKey,customerName, message } = job.data;
+    const { sessionKey: sKey, customerName, message } = job.data;
 
     // ── Lock — garante ordem por cliente ─────────────────────
     const lKey = `lock:${sKey}`;
@@ -105,25 +105,30 @@ Visão identificou: "${descricao}".
 
       // ── Sessão ───────────────────────────────────────────────
       let session = await getSession(sKey);
-      if (!session) {
-        session = { sessionKey: sKey, isActive: true, id: sKey, carrinho: [] };
-        await saveSession(sKey, session);
+
+      // Sempre injeta/atualiza o nome do cliente na memória do Redis, caso mude no WhatsApp
+      if (session) {
+        session.customerName = customerName || session.customerName;
+      } else {
+        session = { sessionKey: sKey, customerName, isActive: true, id: sKey, carrinho: [] };
       }
+
+      await saveSession(sKey, session);
 
       // 1. Garante que temos a sessão no banco para ver o status real
       let dbSession = await prisma.chatSession.upsert({
         where: { sessionKey: sKey },
         create: { sessionKey: sKey, customerName, isActive: true, status: 'NOVO_ATENDIMENTO' },
-        update: {customerName} // Só busca, não altera nada ainda
+        update: { customerName } // Só busca, não altera nada ainda
       });
 
       // 2. Se estava morta (Finalizada/Cancelada), nós reabrimos!
       if (dbSession.status === 'FINALIZADO' || dbSession.status === 'CANCELADO') {
         console.log(`[Worker] 🔄 Cliente ${sKey} voltou! Reabrindo sessão...`);
-        
+
         dbSession = await prisma.chatSession.update({
           where: { id: dbSession.id },
-          data: { 
+          data: {
             status: 'NOVO_ATENDIMENTO', // Volta pra aba "Abertos"
             isActive: true // Devolve o controle pra IA
           }
@@ -138,20 +143,20 @@ Visão identificou: "${descricao}".
         console.log(`[Worker] 👨‍💻 Sessão com Humano. Salvando mensagem sem chamar a IA.`);
 
         // 1. Avisa o Angular instantaneamente para aparecer na tela
-       if (io) {
+        if (io) {
           io.to(`chat_${sKey}`).emit('new_message', { role: 'USER', content: textoFinal });
-          io.to('all_chats').emit('chat_updated', { 
+          io.to('all_chats').emit('chat_updated', {
             id: dbSession.id, // 👉 ENVIANDO O ID REAL DO PRISMA AQUI
-            sessionKey: sKey, 
-            lastMessage: textoFinal, 
-            role: 'USER' 
+            sessionKey: sKey,
+            lastMessage: textoFinal,
+            role: 'USER'
           });
         }
         // 2. Salva a mensagem no banco de dados para o histórico do painel
         await prisma.chatSession.upsert({
           where: { sessionKey: sKey },
           create: { sessionKey: sKey, customerName, isActive: false },
-          update: {customerName},
+          update: { customerName },
         }).then((dbSession) =>
           prisma.chatMessage.create({
             data: {
@@ -162,10 +167,10 @@ Visão identificou: "${descricao}".
           })
         ).catch((e) => console.error('[Prisma Background Error]:', e));
 
-        
-    
+
+
         return;
-      }     
+      }
 
 
       // No worker, ANTES de chamar a IA, adicione este interceptador:
@@ -238,7 +243,7 @@ Quer dar uma olhada nessa sugestão ou prefere fechar o pedido agora?
         textoParaHistorico = 'Quero ver a sugestão que você me deu.';
 
         // Se conseguimos capturar o termo, forçamos a busca exata. Se não, deixamos a IA tentar deduzir.
-       const instrucaoBusca = termoSugerido
+        const instrucaoBusca = termoSugerido
           ? `⚠️ INSTRUÇÃO DO SISTEMA: Você sugeriu "${termoSugerido}". Chame a ferramenta 'listar_produtos' AGORA. DICA VITAL: Não envie a palavra inteira para a ferramenta. Use sua inteligência para enviar apenas a RAIZ da palavra (ex: se for Creatina, envie 'creatin') para o banco encontrar tanto as versões em português quanto as em inglês.`
           : `⚠️ INSTRUÇÃO DO SISTEMA: Olhe para a sua última mensagem. O que você sugeriu? Chame a ferramenta 'listar_produtos' AGORA buscando por essa sugestão. Lembre-se de enviar apenas a RAIZ da palavra (ex: 'creatin' no lugar de creatina).`;
 
@@ -267,16 +272,16 @@ Carrinho atual: ${carrinhoTexto}.
       }
 
       // ── Histórico + IA ───────────────────────────────────────
-     const history = await getHistory(sKey);
+      const history = await getHistory(sKey);
       await pushHistory(sKey, 'USER', textoFinal);
 
-      if (io) {       
+      if (io) {
         io.to(`chat_${sKey}`).emit('new_message', { role: 'USER', content: textoParaHistorico });
-        io.to('all_chats').emit('chat_updated', { 
-            id: dbSession.id, 
-            sessionKey: sKey, 
-            lastMessage: textoParaHistorico, 
-            role: 'USER' 
+        io.to('all_chats').emit('chat_updated', {
+          id: dbSession.id,
+          sessionKey: sKey,
+          lastMessage: textoParaHistorico,
+          role: 'USER'
         });
       }
 
@@ -289,7 +294,7 @@ Carrinho atual: ${carrinhoTexto}.
       });
 
       const aiResponse = await iaService.generateResponse(session, textoFinal, history);
-      await saveSession(sKey, session); 
+      await saveSession(sKey, session);
 
       // ── Handoff ──────────────────────────────────────────────
       if (aiResponse.handoff) {
@@ -300,11 +305,11 @@ Carrinho atual: ${carrinhoTexto}.
 
         await prisma.chatSession.upsert({
           where: { sessionKey: sKey },
-          create: { sessionKey: sKey,customerName, isActive: false, handoffRequestedAt: new Date() },
-          update: {  isActive: false, customerName, handoffRequestedAt: new Date() },
+          create: { sessionKey: sKey, customerName, isActive: false, handoffRequestedAt: new Date() },
+          update: { isActive: false, customerName, handoffRequestedAt: new Date() },
         });
 
-        
+
 
         await adminNotificationQueue.add('handoff-request', {
           sessionKey: sKey,
@@ -331,7 +336,7 @@ Carrinho atual: ${carrinhoTexto}.
         const confirmMatch = aiResponse.content.match(/\[CONFIRM:(.*?)\]/);
         const productName = confirmMatch?.[1] ?? null;
 
-       // 1. Regex à prova de erros (pega SUGESTAO com 1 ou 2 G's)
+        // 1. Regex à prova de erros (pega SUGESTAO com 1 ou 2 G's)
         const sugestaoMatch = aiResponse.content.match(/\[SUG+ESTAO:(.*?)\]/i);
 
         // 2. Extrai o produto
@@ -363,30 +368,30 @@ Carrinho atual: ${carrinhoTexto}.
           await pushHistory(sKey, 'ASSISTANT', finalContent);
           if (io) {
             io.to(`chat_${sKey}`).emit('new_message', { role: 'ASSISTANT', content: finalContent });
-            io.to('all_chats').emit('chat_updated', { 
+            io.to('all_chats').emit('chat_updated', {
               id: dbSession.id, // 👉 ENVIANDO O ID REAL DO PRISMA AQUI TAMBÉM
-              sessionKey: sKey, 
-              lastMessage: finalContent, 
+              sessionKey: sKey,
+              lastMessage: finalContent,
               role: 'ASSISTANT'
             });
           }
         }
 
         // Persiste no Prisma em background...
-     // Persiste a resposta da IA no Prisma em background...
+        // Persiste a resposta da IA no Prisma em background...
         prisma.chatSession.upsert({
           where: { sessionKey: sKey },
-          create: { sessionKey: sKey,customerName, isActive: true },
+          create: { sessionKey: sKey, customerName, isActive: true },
           update: { customerName, updatedAt: new Date() }, // Atualiza a hora da sessão
         }).then((sessaoAtualizada) =>
-          
+
           // 👉 CORREÇÃO 2: Cria apenas a mensagem da IA, pois a do cliente já foi salva!
           prisma.chatMessage.create({
-            data: { 
-              sessionId: sessaoAtualizada.id, 
-              role: 'ASSISTANT', 
-              content: aiResponse.content || '', 
-              tokens: aiResponse.tokens 
+            data: {
+              sessionId: sessaoAtualizada.id,
+              role: 'ASSISTANT',
+              content: aiResponse.content || '',
+              tokens: aiResponse.tokens
             }
           })
 
