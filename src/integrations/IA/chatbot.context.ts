@@ -4,7 +4,6 @@ import { redis } from '../../shared/redis/redis.js';
 import { io } from '../../shared/socket/socket.js';
 
 export class ChatbotContext {
-
   // 1. Busca os Produtos e Categorias ativas com estoque
   async getMenuContext(): Promise<string> {
     const categories = await prisma.category.findMany({
@@ -87,11 +86,10 @@ export class ChatbotContext {
     return orders
       .map(
         (order) =>
-          `Pedido #${order.id.split('-')[0].toUpperCase()} | Status: ${order.status} | Total: R$ ${Number(order.total).toFixed(2)}`
+          `Pedido #${order.id.split('-')[0].toUpperCase()} | Status: ${order.status} | Total: R$ ${Number(order.total).toFixed(2)}`,
       )
       .join('\n');
   }
-
 
   async buscarProdutos(termoBusca: string): Promise<string> {
     const products = await prisma.product.findMany({
@@ -101,8 +99,8 @@ export class ChatbotContext {
         OR: [
           { name: { contains: termoBusca, mode: 'insensitive' } },
           { description: { contains: termoBusca, mode: 'insensitive' } },
-          { categories: { some: { name: { contains: termoBusca, mode: 'insensitive' } } } }
-        ]
+          { categories: { some: { name: { contains: termoBusca, mode: 'insensitive' } } } },
+        ],
       },
       take: 10, // Traz no máximo 4 opções para não poluir o WhatsApp do cliente
       select: {
@@ -111,12 +109,9 @@ export class ChatbotContext {
         price: true,
         description: true,
         imageUrl: true, // ✅ Agora vem de verdade
-        categories: { select: { name: true } }
-      }
-
+        categories: { select: { name: true } },
+      },
     });
-
-
 
     if (products.length === 0) {
       return `Não encontrei produtos para "${termoBusca}".`;
@@ -141,7 +136,7 @@ export class ChatbotContext {
     try {
       // 1. Busca o nome do cliente que foi capturado na sessão do Chatbot
       const chatSession = await prisma.chatSession.findUnique({
-        where: { sessionKey }
+        where: { sessionKey },
       });
 
       const customerName = chatSession?.customerName || 'Cliente WhatsApp';
@@ -153,13 +148,12 @@ export class ChatbotContext {
 
       // 2. Itera sobre os produtos/kits que a IA enviou
       for (const item of dadosCheckout.produtos) {
-        
         // 👉 A BLINDAGEM: Tenta pegar 'quantidade', se vier 'quantity' ele pega também, se vier vazio, assume 1.
         const qtd = Number(item.quantidade || item.quantity || 1);
 
         // --- TENTATIVA 1: É UM PRODUTO ISOLADO? ---
         const produtoBanco = await prisma.product.findFirst({
-          where: { name: { contains: item.nome_produto, mode: 'insensitive' } }
+          where: { name: { contains: item.nome_produto, mode: 'insensitive' } },
         });
 
         if (produtoBanco) {
@@ -178,7 +172,7 @@ export class ChatbotContext {
         // --- TENTATIVA 2: É UM KIT PROMOCIONAL? ---
         const kitBanco = await prisma.kit.findFirst({
           where: { name: { contains: item.nome_produto, mode: 'insensitive' } },
-          include: { items: true }
+          include: { items: true },
         });
 
         if (kitBanco) {
@@ -204,9 +198,10 @@ export class ChatbotContext {
       }
 
       // 3. Calcula Frete Fixo e define o endereço completo
-      const frete = dadosCheckout.metodo_entrega === 'ENTREGA' ? 15.00 : 0.00;
+      const frete = dadosCheckout.metodo_entrega === 'ENTREGA' ? 15.0 : 0.0;
       const total = subtotal + frete;
-      const deliveryAddress = dadosCheckout.metodo_entrega === 'ENTREGA' ? dadosCheckout.endereco_ou_cep : null;
+      const deliveryAddress =
+        dadosCheckout.metodo_entrega === 'ENTREGA' ? dadosCheckout.endereco_ou_cep : null;
 
       // 4. CRIA O PEDIDO NO BANCO COM OS NOVOS CAMPOS DO CLIENTE E ENDEREÇO
       const novoPedido = await prisma.order.create({
@@ -215,18 +210,18 @@ export class ChatbotContext {
           status: 'PENDING',
           customerName,
           customerPhone,
-          deliveryAddress, 
+          deliveryAddress,
           subtotal,
           shippingCost: frete,
           total,
-          notes: dadosCheckout.notes || null,          
+          notes: dadosCheckout.notes || null,
           items: {
-            create: orderItemsData
+            create: orderItemsData,
           },
           statusHistory: {
-            create: [{ status: 'PENDING', note: 'Pedido gerado via WhatsApp (IA)' }]
-          }
-        }
+            create: [{ status: 'PENDING', note: 'Pedido gerado via WhatsApp (IA)' }],
+          },
+        },
       });
 
       // 🔥 5. INTEGRAÇÃO MERCADO PAGO / SICREDI: Desativada temporariamente para testes 🔥
@@ -239,7 +234,6 @@ export class ChatbotContext {
         // const pixData = await paymentsService.generatePix(novoPedido.id, 'cliente@havoc.com.br', customerName);
         // pixCopiaECola = pixData.pixCode || '';
         pixCopiaECola = '00020126580014br.gov.bcb.pix... (Pix Fictício de Teste)';
-
       } else if (dadosCheckout.metodo_pagamento === 'CARTAO') {
         // const linkData = await paymentsService.generateLink(novoPedido.id);
         // linkPagamento = linkData.paymentLink || '';
@@ -266,7 +260,6 @@ export class ChatbotContext {
         textoResposta += `Utilize a chave copia-e-cola abaixo para finalizar:\n\n`;
         textoResposta += `[PIX:${pixCopiaECola}]\n\n`;
         textoResposta += `Assim que o pagamento for aprovado, nosso sistema confirma tudo automaticamente por aqui! 🚀`;
-
       } else if (dadosCheckout.metodo_pagamento === 'CARTAO') {
         textoResposta += `💳 *PAGAMENTO NO CARTÃO* 💳\n`;
         textoResposta += `Acesse seu link seguro para finalizar a compra em até 12x:\n\n`;
@@ -284,13 +277,17 @@ export class ChatbotContext {
             cliente: customerName,
             telefone: customerPhone,
             endereco: deliveryAddress || '>>> RETIRADA BALCÃO <<<',
-            itens: dadosCheckout.produtos.map((p: any) => `${p.quantidade || p.quantity || 1}x ${p.nome_produto}`),
+            itens: dadosCheckout.produtos.map(
+              (p: any) => `${p.quantidade || p.quantity || 1}x ${p.nome_produto}`,
+            ),
             total: total,
-            data: new Date().toLocaleString('pt-BR')
+            data: new Date().toLocaleString('pt-BR'),
           };
 
           io.emit('imprimir_cupom', cupom);
-          console.log(`[Teste Impressão] 🖨️ Ordem enviada para a impressora: Pedido ${novoPedido.code}`);
+          console.log(
+            `[Teste Impressão] 🖨️ Ordem enviada para a impressora: Pedido ${novoPedido.code}`,
+          );
         }
       } catch (printError) {
         console.error('[Erro no teste de impressão]:', printError);
@@ -298,28 +295,58 @@ export class ChatbotContext {
 
       // 9. Retorna o texto para a Carol
       return textoResposta;
-
     } catch (error) {
       console.error('[Erro ao gerar checkout]:', error);
-      return "Ocorreu um erro interno ao gerar o número do pedido. Avise ao cliente que você vai chamar um humano para finalizar a venda.";
+      return 'Ocorreu um erro interno ao gerar o número do pedido. Avise ao cliente que você vai chamar um humano para finalizar a venda.';
     }
   }
 
   async listarProdutos(termoBusca: string): Promise<string> {
     // 1. Limpeza inteligente e Tradução Universal de Suplementos
     let termoLimpo = termoBusca
-      .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Tira acentos
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // Tira acentos
       .toLowerCase();
 
     // Dicionário de palavras inúteis
     const palavrasInuteis = [
-      'preciso', 'quero', 'de', 'um', 'uma', 'gostaria', 'comprar', 'busco', 'ver', 'tem', 'sugestao',
-      'promocao', 'promo', 'unidades', 'unidade', 'pack', 'com', 'x', 'para', 'o', 'a', 'e',
-      'powder', 'dietary', 'supplement', 'suplemento', 'flavor', 'sabor', 'nutrition', 'advanced', 'formula'
+      'preciso',
+      'quero',
+      'de',
+      'um',
+      'uma',
+      'gostaria',
+      'comprar',
+      'busco',
+      'ver',
+      'tem',
+      'sugestao',
+      'promocao',
+      'promo',
+      'unidades',
+      'unidade',
+      'pack',
+      'com',
+      'x',
+      'para',
+      'o',
+      'a',
+      'e',
+      'powder',
+      'dietary',
+      'supplement',
+      'suplemento',
+      'flavor',
+      'sabor',
+      'nutrition',
+      'advanced',
+      'formula',
     ];
 
     // Filtra palavras inúteis e números isolados
-    const termos = termoLimpo.split(' ').filter(t => t.trim().length > 1 && !palavrasInuteis.includes(t) && isNaN(Number(t)));
+    const termos = termoLimpo
+      .split(' ')
+      .filter((t) => t.trim().length > 1 && !palavrasInuteis.includes(t) && isNaN(Number(t)));
 
     if (termos.length === 0) {
       return 'Por favor, seja mais específico no nome do produto.';
@@ -340,15 +367,15 @@ export class ChatbotContext {
       console.error('⚠️ [Redis Error] Falha ao ler cache, buscando no DB...', err);
     }
 
-    const condicoesAND = termos.map(termo => ({
-      name: { contains: termo, mode: 'insensitive' as const }
+    const condicoesAND = termos.map((termo) => ({
+      name: { contains: termo, mode: 'insensitive' as const },
     }));
 
     // 2. BUSCA EXCLUSIVA NOS PRODUTOS ISOLADOS (A Mágica da Limpeza)
     const products = await prisma.product.findMany({
       where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
-      take: 4, // 👈 TRAVA DE SEGURANÇA: Mostra no máximo 4 opções
-      select: { name: true, price: true }
+      take: 6,
+      select: { name: true, price: true },
     });
 
     if (products.length === 0) {
@@ -402,59 +429,96 @@ export class ChatbotContext {
     // 👉 TENTATIVA 1: BUSCA EXATA (A Mágica da Velocidade)
     // Como o cliente geralmente clica no botão ou digita o número, nós recebemos o nome exato do banco.
     const produtoExato = await prisma.product.findFirst({
-      where: { name: { equals: nomeProduto.trim(), mode: 'insensitive' }, isActive: true, stock: { gt: 0 } }
+      where: {
+        name: { equals: nomeProduto.trim(), mode: 'insensitive' },
+        isActive: true,
+        stock: { gt: 0 },
+      },
     });
     if (produtoExato) return formatarProduto(produtoExato);
 
     const kitExato = await prisma.kit.findFirst({
       where: { name: { equals: nomeProduto.trim(), mode: 'insensitive' }, isActive: true },
-      include: { items: { include: { product: { select: { name: true } } } } }
+      include: { items: { include: { product: { select: { name: true } } } } },
     });
     if (kitExato) return formatarKit(kitExato);
 
     // 👉 TENTATIVA 2: FALLBACK (Busca fragmentada caso o cliente tenha digitado só um pedaço na mão)
     let termoLimpo = nomeProduto
-      .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Tira acentos
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // Tira acentos
       .toLowerCase();
 
     const palavrasInuteis = [
-      'promocao', 'promo', 'unidades', 'unidade', 'pack', 'de', 'com', 'x', 'para', 'o', 'a', 'e',
-      'powder', 'dietary', 'supplement', 'suplemento', 'flavor', 'sabor', 'nutrition', 'advanced', 'formula'
+      'promocao',
+      'promo',
+      'unidades',
+      'unidade',
+      'pack',
+      'de',
+      'com',
+      'x',
+      'para',
+      'o',
+      'a',
+      'e',
+      'powder',
+      'dietary',
+      'supplement',
+      'suplemento',
+      'flavor',
+      'sabor',
+      'nutrition',
+      'advanced',
+      'formula',
     ];
 
-    const termos = termoLimpo.split(' ').filter((t: string) => t.trim().length > 1 && !palavrasInuteis.includes(t) && isNaN(Number(t)));
+    const termos = termoLimpo
+      .split(' ')
+      .filter(
+        (t: string) => t.trim().length > 1 && !palavrasInuteis.includes(t) && isNaN(Number(t)),
+      );
 
     if (termos.length === 0) return `O item "${nomeProduto}" não foi encontrado.`;
 
     const condicoesAND = termos.map((termo: string) => ({
-      name: { contains: termo, mode: 'insensitive' as const }
+      name: { contains: termo, mode: 'insensitive' as const },
     }));
 
     const buscandoKit = termos.includes('kit');
 
     if (buscandoKit) {
-      const kitEncontrado = await prisma.kit.findFirst({ where: { isActive: true, AND: condicoesAND }, include: { items: { include: { product: { select: { name: true } } } } } });
+      const kitEncontrado = await prisma.kit.findFirst({
+        where: { isActive: true, AND: condicoesAND },
+        include: { items: { include: { product: { select: { name: true } } } } },
+      });
       if (kitEncontrado) return formatarKit(kitEncontrado);
 
-      const prodEncontrado = await prisma.product.findFirst({ where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND } });
+      const prodEncontrado = await prisma.product.findFirst({
+        where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
+      });
       if (prodEncontrado) return formatarProduto(prodEncontrado);
     } else {
-      const prodEncontrado = await prisma.product.findFirst({ where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND } });
+      const prodEncontrado = await prisma.product.findFirst({
+        where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
+      });
       if (prodEncontrado) return formatarProduto(prodEncontrado);
 
-      const kitEncontrado = await prisma.kit.findFirst({ where: { isActive: true, AND: condicoesAND }, include: { items: { include: { product: { select: { name: true } } } } } });
+      const kitEncontrado = await prisma.kit.findFirst({
+        where: { isActive: true, AND: condicoesAND },
+        include: { items: { include: { product: { select: { name: true } } } } },
+      });
       if (kitEncontrado) return formatarKit(kitEncontrado);
     }
 
     return `O item "${nomeProduto}" não foi encontrado no estoque ou nas promoções ativas.`;
   }
 
-
   async excluirConversa(sessionKey: string): Promise<string> {
     try {
       const session = await prisma.chatSession.findUnique({
         where: { sessionKey },
-        select: { id: true }
+        select: { id: true },
       });
 
       if (!session) {
@@ -463,17 +527,16 @@ export class ChatbotContext {
 
       // 1. Apaga as mensagens primeiro (FK constraint)
       const { count } = await prisma.chatMessage.deleteMany({
-        where: { sessionId: session.id }
+        where: { sessionId: session.id },
       });
 
       // 2. Apaga a sessão
       await prisma.chatSession.delete({
-        where: { id: session.id }
+        where: { id: session.id },
       });
 
       console.log(`[Excluir] 🗑️ ${count} mensagens + sessão ${session.id} deletadas.`);
       return `ok`;
-
     } catch (error) {
       console.error('[Excluir Conversa Error]:', error);
       return `erro`;
@@ -482,12 +545,12 @@ export class ChatbotContext {
 
   async removerProdutoDoCarrinho(session: any, nomeProduto: string): Promise<string> {
     if (!session.carrinho || session.carrinho.length === 0) {
-      return "Seu carrinho já está vazio.";
+      return 'Seu carrinho já está vazio.';
     }
 
     // Filtra o carrinho removendo o item (busca por aproximação simples)
-    const novoCarrinho = session.carrinho.filter((item: string) =>
-      !item.toLowerCase().includes(nomeProduto.toLowerCase())
+    const novoCarrinho = session.carrinho.filter(
+      (item: string) => !item.toLowerCase().includes(nomeProduto.toLowerCase()),
     );
 
     if (novoCarrinho.length === session.carrinho.length) {
@@ -510,22 +573,22 @@ export class ChatbotContext {
       const order = await prisma.order.findFirst({
         where: {
           user: { chatSessions: { some: { sessionKey } } },
-          status: 'PENDING'
+          status: 'PENDING',
         },
-        orderBy: { createdAt: 'desc' }
+        orderBy: { createdAt: 'desc' },
       });
 
       if (order) {
         await prisma.order.update({
           where: { id: order.id },
-          data: { status: 'CANCELLED' }
+          data: { status: 'CANCELLED' },
         });
       }
 
-      return "Pedido e atendimento cancelados com sucesso. Se precisar de algo, é só chamar!";
+      return 'Pedido e atendimento cancelados com sucesso. Se precisar de algo, é só chamar!';
     } catch (error) {
       console.error('Erro ao cancelar:', error);
-      return "Ocorreu um erro ao cancelar, mas já limpei sua sessão.";
+      return 'Ocorreu um erro ao cancelar, mas já limpei sua sessão.';
     }
   }
 }
