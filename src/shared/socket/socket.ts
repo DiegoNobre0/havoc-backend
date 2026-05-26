@@ -7,8 +7,8 @@ export function setupSocket(server: any) {
   io = new SocketIOServer(server, {
     cors: {
       origin: '*',
-      methods: ['GET', 'POST']
-    }
+      methods: ['GET', 'POST'],
+    },
   });
 
   io.on('connection', (socket) => {
@@ -23,12 +23,17 @@ export function setupSocket(server: any) {
       console.log(`[Socket.io] 🎧 Painel escutando o chat do número: ${sessionKey}`);
     });
 
+    socket.on('join_room', (room) => {
+      socket.join(room);
+      console.log(`🏢 Cliente ${socket.id} entrou na sala: ${room}`);
+    });
+
     socket.on('leave_chat', (sessionKey: string) => {
       socket.leave(`chat_${sessionKey}`);
     });
 
     socket.on('join_chat_list', () => {
-      socket.join('all_chats'); 
+      socket.join('all_chats');
     });
 
     socket.on('disconnect', () => {
