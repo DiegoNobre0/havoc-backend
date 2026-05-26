@@ -145,19 +145,16 @@ export class PaymentsService {
   // 👉 3. PROCESSAR WEBHOOK (COM VALIDAÇÃO DE ASSINATURA)
   // ==============================================================
   async processWebhook(body: any, headers: any) {
-    // 👉 Agora recebe os headers do controller
     const type = body.type || body.topic;
     const paymentId = body.data?.id || body.resource;
 
     if (type !== 'payment' || !paymentId) return;
 
-    // 🛡️ TRAVA 1: VALIDAÇÃO DA ASSINATURA DO WEBHOOK (HMAC SHA256)
     const secret = process.env.MERCADO_PAGO_WEBHOOK_SECRET;
     const signatureHeader = headers['x-signature'];
     const requestId = headers['x-request-id'];
 
     if (secret && signatureHeader && requestId) {
-      // O MP manda o header no formato: "ts=1614567890,v1=abcdef123..."
       const tsMatch = signatureHeader.match(/ts=(\d+)/);
       const v1Match = signatureHeader.match(/v1=([a-f0-9]+)/);
 
@@ -165,15 +162,19 @@ export class PaymentsService {
         const ts = tsMatch[1];
         const hash = v1Match[1];
 
-        // A regra do MP é juntar: id + request-id + timestamp
-        const manifest = `id:${paymentId};request-id:${requestId};ts:${ts};`;
+        // ✅ Garante string pura — número vira "160291108545", não muda nada
+        const idStr = String(paymentId).trim();
+        const reqId = String(requestId).trim();
 
-        // Criptografa o manifesto usando a sua Chave Secreta
+        const manifest = `id:${idStr};request-id:${reqId};ts:${ts};`;
+
         const hmac = crypto.createHmac('sha256', secret).update(manifest).digest('hex');
 
-        // Se a assinatura não bater, é tentativa de fraude! Bloqueia na hora.
         if (hmac !== hash) {
-          console.error('🚨 [Mercado Pago] Tentativa de fraude: Assinatura do Webhook inválida!');
+          console.error('🚨 [Mercado Pago] Assinatura inválida!');
+          console.error(`  → manifest: ${manifest}`);
+          console.error(`  → esperado: ${hash}`);
+          console.error(`  → calculado: ${hmac}`);
           throw new AppError('Assinatura inválida', 401);
         }
       }
