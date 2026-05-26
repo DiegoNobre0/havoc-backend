@@ -154,6 +154,11 @@ export class PaymentsService {
     const signatureHeader = headers['x-signature'];
     const requestId = headers['x-request-id'];
 
+    if (secret && (!signatureHeader || !requestId)) {
+      console.error('🚨 [Mercado Pago] Webhook sem assinatura rejeitado!');
+      throw new AppError('Assinatura ausente', 401);
+    }
+
     if (secret && signatureHeader && requestId) {
       const tsMatch = signatureHeader.match(/ts=(\d+)/);
       const v1Match = signatureHeader.match(/v1=([a-f0-9]+)/);
