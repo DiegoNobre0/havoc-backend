@@ -26,7 +26,9 @@ export class PaymentsController {
   // ─── ROTA ABERTA PARA O MERCADO PAGO BATER ───
   async webhook(request: FastifyRequest, reply: FastifyReply) {
     const body: any = request.body;
+    const headers = request.headers; // 👉 CAPTURA OS HEADERS AQUI
 
+    // O MP pode enviar a notificação usando "action" ou "type" ou "topic"
     const actionType = body?.action || body?.type || body?.topic;
 
     if (
@@ -37,26 +39,23 @@ export class PaymentsController {
       const paymentId = body?.data?.id || body?.resource;
 
       if (paymentId) {
-        // ✅ Extrai APENAS os headers necessários para a validação
-        // Evita problemas de serialização do objeto IncomingHttpHeaders completo
-        const relevantHeaders = {
-          'x-signature': (request.headers['x-signature'] as string) ?? null,
-          'x-request-id': (request.headers['x-request-id'] as string) ?? null,
-        };
-
+        // 🔥 Joga o BODY e os HEADERS para o BullMQ processar assincronamente 🔥
         await paymentQueue.add(
           'process-mp-webhook',
-          { body, headers: relevantHeaders },
+          {
+            body,
+            headers, // 👉 Repassando a chave de segurança para o worker
+          },
           {
             removeOnComplete: true,
-            removeOnFail: 50, // mantém os últimos 50 falhos para debug
-            attempts: 3,
+            attempts: 3, // Se falhar, tenta de novo 3 vezes
             backoff: { type: 'exponential', delay: 2000 },
           },
         );
       }
     }
 
+    // Devolve 200 imediatamente para o MP não bloquear nossa API
     return reply.status(200).send('OK');
   }
 }
