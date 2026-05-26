@@ -1,83 +1,61 @@
 import { prisma } from '../../database/prisma.js';
 import { AppError } from '../../shared/errors/AppError.js';
-import crypto from 'crypto';
-import fs from 'fs';
-import https from 'https';
 import axiosStatic from 'axios';
 import { io } from '../../shared/socket/socket.js';
+import crypto from 'crypto';
 
 export class PaymentsService {
-  // ─── CREDENCIAIS SICREDI (VIA .ENV) ───────────────────────────
-  private readonly clientId = process.env.SICREDI_CLIENT_ID!;
-  private readonly clientSecret = process.env.SICREDI_CLIENT_SECRET!;
-  private readonly chavePix = process.env.SICREDI_CHAVE_PIX!;
-  private readonly baseUrl = process.env.SICREDI_BASE_URL || 'https://api-pix.sicredi.com.br';
+  // ─── CREDENCIAIS MERCADO PAGO (VIA .ENV) ───────────────────────────
+  // No seu .env, adicione: MERCADO_PAGO_ACCESS_TOKEN=APP_USR-12345...
+  private readonly accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN!;
+  private readonly baseUrl = 'https://api.mercadopago.com';
 
-  // ─── AGENTE DE SEGURANÇA (mTLS EXIGIDO PELO BANCO) ────────────
-  private getHttpsAgent() {
-    const certPath = process.env.SICREDI_CERT_PATH || './certs/certificado.pem';
-    const keyPath = process.env.SICREDI_KEY_PATH || './certs/chave.pem';
-    
-    if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
-      throw new AppError('Certificados mTLS do Sicredi não encontrados na pasta /certs.', 500);
-    }
-
-    return new https.Agent({
-      cert: fs.readFileSync(certPath),
-      key: fs.readFileSync(keyPath),
-      passphrase: process.env.SICREDI_CERT_PASSWORD || '', 
-    });
-  }
-
-  // ─── OBTENÇÃO DE TOKEN OAUTH2 DO BANCO ───────────────────────
-  private async getAccessToken(): Promise<string> {
-    const auth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
-    
-    try {
-      const response = await axiosStatic.post(`${this.baseUrl}/oauth/token`, 'grant_type=client_credentials', {
-        headers: {
-          'Authorization': `Basic ${auth}`,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        httpsAgent: this.getHttpsAgent()
-      });
-      return response.data.access_token;
-    } catch (error: any) {
-      console.error('[Sicredi Auth Error]:', error.response?.data || error.message);
-      throw new AppError('Falha ao autenticar com a API do Sicredi.', 500);
-    }
+  // Helper para injetar o header de autenticação em todas as requisições
+  private get headers() {
+    return {
+      Authorization: `Bearer ${this.accessToken}`,
+      'Content-Type': 'application/json',
+      // Opcional: Adiciona um id de idempotência para evitar cobranças duplicadas em falhas de rede
+      'X-Idempotency-Key': crypto.randomUUID(),
+    };
   }
 
   // ==============================================================
-  // 👉 1. GERAR PIX (COBRANÇA IMEDIATA)
+  // 👉 1. GERAR PIX (COBRANÇA IMEDIATA COM COPIA E COLA)
   // ==============================================================
   async generatePix(orderId: string, email: string, name: string, cpf?: string) {
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new AppError('Pedido não encontrado.', 404);
 
     const existingPayment = await prisma.payment.findFirst({
-      where: { orderId, method: 'PIX', status: { in: ['PENDING', 'PAID'] } }
+      where: { orderId, method: 'PIX', status: { in: ['PENDING', 'PAID'] } },
     });
 
     if (existingPayment?.pixCode) return existingPayment;
 
-    const accessToken = await this.getAccessToken();
-    const txid = crypto.randomBytes(16).toString('hex'); 
-    const cpfLimpo = cpf ? cpf.replace(/\D/g, '') : '00000000000'; 
+    // O MP exige um e-mail. Se for pedido via WhatsApp sem cadastro, usamos um fallback
+    const payerEmail = email && email.includes('@') ? email : 'cliente@havocsuplementos.shop';
+    const cpfLimpo = cpf ? cpf.replace(/\D/g, '') : null;
 
     const payload = {
-      calendario: { expiracao: 3600 },
-      devedor: { cpf: cpfLimpo, nome: name },
-      valor: { original: Number(order.total).toFixed(2) },
-      chave: this.chavePix,
-      solicitacaoPagador: `Pedido ${order.code} - Havoc Suplementos`
+      transaction_amount: Number(order.total),
+      description: `Pedido ${order.code} - Havoc Suplementos`,
+      payment_method_id: 'pix',
+      external_reference: orderId, // Crucial para vincular o webhook depois
+      payer: {
+        email: payerEmail,
+        first_name: name,
+        ...(cpfLimpo && { identification: { type: 'CPF', number: cpfLimpo } }),
+      },
     };
 
     try {
-      const response = await axiosStatic.put(`${this.baseUrl}/api/v2/cob/${txid}`, payload, {
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        httpsAgent: this.getHttpsAgent()
+      const response = await axiosStatic.post(`${this.baseUrl}/v1/payments`, payload, {
+        headers: this.headers,
       });
+
+      const paymentData = response.data;
+      const pixCode = paymentData.point_of_interaction?.transaction_data?.qr_code;
 
       return await prisma.payment.upsert({
         where: { orderId },
@@ -86,92 +64,142 @@ export class PaymentsService {
           method: 'PIX',
           amount: order.total,
           status: 'PENDING',
-          externalId: response.data.txid,
-          pixCode: response.data.pixCopiaECola,
-          expiresAt: new Date(Date.now() + 3600 * 1000)
+          externalId: String(paymentData.id),
+          pixCode: pixCode,
+          expiresAt: new Date(Date.now() + 30 * 60 * 1000), // PIX expira em 30 min por padrão no MP
         },
         update: {
           method: 'PIX',
           status: 'PENDING',
-          externalId: response.data.txid,
-          pixCode: response.data.pixCopiaECola,
-          expiresAt: new Date(Date.now() + 3600 * 1000)
-        }
+          externalId: String(paymentData.id),
+          pixCode: pixCode,
+          expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+        },
       });
     } catch (error: any) {
-      console.error('[Sicredi Pix Error]:', error.response?.data || error.message);
-      throw new AppError('Erro ao gerar PIX no Sicredi.', 500);
+      console.error('[Mercado Pago Pix Error]:', error.response?.data || error.message);
+      throw new AppError('Erro ao gerar PIX no Mercado Pago.', 500);
     }
   }
 
   // ==============================================================
-  // 👉 2. GERAR LINK DE PAGAMENTO (BOLETO HÍBRIDO)
+  // 👉 2. GERAR LINK DE PAGAMENTO (CHECKOUT PRO / CARTÃO E BOLETO)
   // ==============================================================
   async generateLink(orderId: string) {
-    // No Sicredi, o "Link" para o cliente geralmente é a visualização de um Boleto 
-    // que já aceita PIX. Vamos usar a API de Cobrança com Boleto do Sicredi.
-    
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new AppError('Pedido não encontrado.', 404);
 
-    const accessToken = await this.getAccessToken();
+    const payload = {
+      items: [
+        {
+          title: `Pedido ${order.code} - Havoc Suplementos`,
+          description: 'Suplementos e Vitaminas',
+          quantity: 1,
+          currency_id: 'BRL',
+          unit_price: Number(order.total),
+        },
+      ],
+      external_reference: orderId,
+      // Opcional: Redireciona o cliente de volta pro seu site após pagar
+      back_urls: {
+        success: 'https://havocsuplementos.shop/sucesso',
+        pending: 'https://havocsuplementos.shop/pendente',
+        failure: 'https://havocsuplementos.shop/falha',
+      },
+      auto_return: 'approved',
+    };
 
-    // Nota: A estrutura de Boletos varia conforme a carteira do cliente no Sicredi.
-    // Este é um exemplo da chamada de emissão de boleto.
     try {
-      const response = await axiosStatic.post(`${this.baseUrl}/api/v1/boletos`, {
-        pagador: { /* dados do cliente */ },
-        valor: Number(order.total),
-        dataVencimento: "2026-05-20", // Exemplo
-        especieDocumento: "DM"
-      }, {
-        headers: { 'Authorization': `Bearer ${accessToken}` },
-        httpsAgent: this.getHttpsAgent()
+      const response = await axiosStatic.post(`${this.baseUrl}/checkout/preferences`, payload, {
+        headers: this.headers,
       });
 
-      return prisma.payment.upsert({
+      // init_point é o link oficial de produção do Mercado Pago
+      const paymentLink = response.data.init_point;
+
+      return await prisma.payment.upsert({
         where: { orderId },
         create: {
           orderId,
           method: 'PAYMENT_LINK',
           amount: order.total,
           status: 'PENDING',
-          externalId: response.data.nossoNumero,
-          paymentLink: response.data.urlBoleto, // O "Link" que você queria!
+          externalId: response.data.id,
+          paymentLink: paymentLink,
         },
         update: {
-          paymentLink: response.data.urlBoleto
-        }
+          paymentLink: paymentLink,
+        },
       });
     } catch (error: any) {
-      // Se a conta do cliente não tiver Boletos ativos, vamos dar fallback para o PIX
-      console.warn('⚠️ API de Boletos não configurada. Gerando PIX como alternativa de link.');
-      return this.generatePix(orderId, 'email@exemplo.com', 'Cliente');
+      console.error('[Mercado Pago Link Error]:', error.response?.data || error.message);
+      throw new AppError('Erro ao gerar link de pagamento no Mercado Pago.', 500);
     }
   }
 
   // ==============================================================
-  // 👉 3. PROCESSAR WEBHOOK E DISPARAR IMPRESSORA DA LOJA
+  // 👉 3. PROCESSAR WEBHOOK (COM VALIDAÇÃO DE ASSINATURA)
   // ==============================================================
-  async processWebhook(body: any) {
-    // O padrão do Banco Central (Sicredi incluído) envia um array "pix"
-    if (!body.pix || !Array.isArray(body.pix)) return;
+  async processWebhook(body: any, headers: any) {
+    // 👉 Agora recebe os headers do controller
+    const type = body.type || body.topic;
+    const paymentId = body.data?.id || body.resource;
 
-    for (const p of body.pix) {
-      const payment = await prisma.payment.findFirst({
-        where: { externalId: p.txid }
+    if (type !== 'payment' || !paymentId) return;
+
+    // 🛡️ TRAVA 1: VALIDAÇÃO DA ASSINATURA DO WEBHOOK (HMAC SHA256)
+    const secret = process.env.MERCADO_PAGO_WEBHOOK_SECRET;
+    const signatureHeader = headers['x-signature'];
+    const requestId = headers['x-request-id'];
+
+    if (secret && signatureHeader && requestId) {
+      // O MP manda o header no formato: "ts=1614567890,v1=abcdef123..."
+      const tsMatch = signatureHeader.match(/ts=(\d+)/);
+      const v1Match = signatureHeader.match(/v1=([a-f0-9]+)/);
+
+      if (tsMatch && v1Match) {
+        const ts = tsMatch[1];
+        const hash = v1Match[1];
+
+        // A regra do MP é juntar: id + request-id + timestamp
+        const manifest = `id:${paymentId};request-id:${requestId};ts:${ts};`;
+
+        // Criptografa o manifesto usando a sua Chave Secreta
+        const hmac = crypto.createHmac('sha256', secret).update(manifest).digest('hex');
+
+        // Se a assinatura não bater, é tentativa de fraude! Bloqueia na hora.
+        if (hmac !== hash) {
+          console.error('🚨 [Mercado Pago] Tentativa de fraude: Assinatura do Webhook inválida!');
+          throw new AppError('Assinatura inválida', 401);
+        }
+      }
+    }
+
+    try {
+      // 🛡️ TRAVA 2: CONFIRMAÇÃO DIRETA NA API (Dupla Checagem)
+      const idLimpo = String(paymentId).replace(/\D/g, '');
+
+      const mpResponse = await axiosStatic.get(`${this.baseUrl}/v1/payments/${idLimpo}`, {
+        headers: this.headers,
       });
 
-      if (!payment || payment.status === 'PAID') continue;
+      const paymentData = mpResponse.data;
+
+      if (paymentData.status !== 'approved') return;
+
+      const orderId = paymentData.external_reference;
+      const payment = await prisma.payment.findFirst({ where: { orderId: orderId } });
+
+      if (!payment || payment.status === 'PAID') return;
 
       // 1. Atualiza Pagamento
       await prisma.payment.update({
         where: { id: payment.id },
         data: {
           status: 'PAID',
-          paidAt: new Date(p.horario),
-          webhookPayload: p
-        }
+          paidAt: new Date(paymentData.date_approved),
+          webhookPayload: paymentData,
+        },
       });
 
       // 2. Atualiza Pedido E TRÁS OS DADOS PARA O CUPOM
@@ -180,36 +208,33 @@ export class PaymentsService {
         data: { status: 'CONFIRMED' },
         include: {
           items: {
-            include: {
-              product: { select: { name: true } },
-              kit: { select: { name: true } }
-            }
-          }
-        }
+            include: { product: { select: { name: true } }, kit: { select: { name: true } } },
+          },
+        },
       });
 
-      // 3. Notificações via Socket
+      // 3. Notificações e Impressão
       if (io) {
-        // -> Avisa a tela do cliente (se ele estiver acompanhando via web)
         io.to(`order_${payment.orderId}`).emit('payment_confirmed', {
           orderId: payment.orderId,
-          status: 'PAID'
+          status: 'PAID',
         });
 
-        // 🔥 4. A MÁGICA DA IMPRESSORA: Monta o cupom e envia para a loja 🔥
         const cupom = {
           codigo: updatedOrder.code,
           cliente: updatedOrder.customerName,
           telefone: updatedOrder.customerPhone,
           endereco: updatedOrder.deliveryAddress || '>>> RETIRADA BALCÃO <<<',
-          itens: updatedOrder.items.map(i => `${i.quantity}x ${i.product?.name || i.kit?.name}`),
+          itens: updatedOrder.items.map((i) => `${i.quantity}x ${i.product?.name || i.kit?.name}`),
           total: updatedOrder.total,
-          data: new Date().toLocaleString('pt-BR')
+          data: new Date().toLocaleString('pt-BR'),
         };
 
         io.to('loja_fisica').emit('imprimir_cupom', cupom);
-        console.log(`[Impressão] 🖨️ Ordem enviada para a loja: Pedido ${updatedOrder.code}`);
+        console.log(`[Impressão MP] 🖨️ Ordem enviada para a loja: Pedido ${updatedOrder.code}`);
       }
+    } catch (error: any) {
+      console.error('[Mercado Pago Webhook Error]: Falha ao processar notificação', error.message);
     }
   }
 

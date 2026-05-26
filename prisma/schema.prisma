@@ -57,6 +57,7 @@ enum ChatSessionStatus {
   ATENDIMENTO_HUMANO
   FINALIZADO
   CANCELADO
+  
 }
 
 enum ShippingType {
@@ -287,6 +288,7 @@ model ChatSession {
   sessionKey         String    @unique @default(uuid())
   customerName       String?
   isActive           Boolean   @default(false)
+  recoveryAttempts   Int               @default(0)
   status             ChatSessionStatus @default(NOVO_ATENDIMENTO)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt

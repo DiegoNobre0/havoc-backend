@@ -14,8 +14,12 @@ const adminNotificationQueue = new Queue('admin-notifications', { connection: re
 const SESSION_TTL = 86_400;
 const MAX_HISTORY = 30;
 
-function sessionKey(key: string) { return `chat:session:${key}`; }
-function historyKey(key: string) { return `chat:history:${key}`; }
+function sessionKey(key: string) {
+  return `chat:session:${key}`;
+}
+function historyKey(key: string) {
+  return `chat:history:${key}`;
+}
 
 async function getSession(key: string) {
   const data = await (redis as any).get(sessionKey(key));
@@ -72,7 +76,7 @@ export const chatbotWorker = new Worker(
           sKey,
           resultado === 'ok'
             ? '✅ Conversa apagada com sucesso.'
-            : '⚠️ Não encontrei nenhuma conversa para apagar.'
+            : '⚠️ Não encontrei nenhuma conversa para apagar.',
         );
         return;
       }
@@ -119,7 +123,7 @@ Visão identificou: "${descricao}".
       let dbSession = await prisma.chatSession.upsert({
         where: { sessionKey: sKey },
         create: { sessionKey: sKey, customerName, isActive: true, status: 'NOVO_ATENDIMENTO' },
-        update: { customerName } // Só busca, não altera nada ainda
+        update: { customerName, recoveryAttempts: 0 }, // Só busca, não altera nada ainda
       });
 
       // 2. Se estava morta (Finalizada/Cancelada), nós reabrimos!
@@ -130,8 +134,9 @@ Visão identificou: "${descricao}".
           where: { id: dbSession.id },
           data: {
             status: 'NOVO_ATENDIMENTO', // Volta pra aba "Abertos"
-            isActive: true // Devolve o controle pra IA
-          }
+            isActive: true, // Devolve o controle pra IA
+            recoveryAttempts: 0,
+          },
         });
 
         // Atualiza a memória do Redis na mesma hora pra IA não ficar calada
@@ -149,29 +154,29 @@ Visão identificou: "${descricao}".
             id: dbSession.id, // 👉 ENVIANDO O ID REAL DO PRISMA AQUI
             sessionKey: sKey,
             lastMessage: textoFinal,
-            role: 'USER'
+            role: 'USER',
           });
         }
         // 2. Salva a mensagem no banco de dados para o histórico do painel
-        await prisma.chatSession.upsert({
-          where: { sessionKey: sKey },
-          create: { sessionKey: sKey, customerName, isActive: false },
-          update: { customerName },
-        }).then((dbSession) =>
-          prisma.chatMessage.create({
-            data: {
-              sessionId: dbSession.id,
-              role: 'USER',
-              content: textoFinal
-            }
+        await prisma.chatSession
+          .upsert({
+            where: { sessionKey: sKey },
+            create: { sessionKey: sKey, customerName, isActive: false },
+            update: { customerName },
           })
-        ).catch((e) => console.error('[Prisma Background Error]:', e));
-
-
+          .then((dbSession) =>
+            prisma.chatMessage.create({
+              data: {
+                sessionId: dbSession.id,
+                role: 'USER',
+                content: textoFinal,
+              },
+            }),
+          )
+          .catch((e) => console.error('[Prisma Background Error]:', e));
 
         return;
       }
-
 
       // No worker, ANTES de chamar a IA, adicione este interceptador:
       const ehNumero = /^\d+$/.test(textoFinal?.trim() || '');
@@ -201,8 +206,15 @@ O cliente escolheu o item ${textoFinal} da lista, que corresponde a "${nomeProdu
       const textoMinusculo = textoFinal?.toLowerCase() || '';
 
       // 1. Confirmação do Produto ("Sim, é esse!")
-      if (textoFinal?.includes('CONFIRM_YES') || textoFinal?.includes('[PRODUTO_CONFIRMADO]') || textoMinusculo.includes('sim, é esse')) {
-        let nomeProduto = textoFinal.replace('[PRODUTO_CONFIRMADO]', '').replace('CONFIRM_YES:', '').trim();
+      if (
+        textoFinal?.includes('CONFIRM_YES') ||
+        textoFinal?.includes('[PRODUTO_CONFIRMADO]') ||
+        textoMinusculo.includes('sim, é esse')
+      ) {
+        let nomeProduto = textoFinal
+          .replace('[PRODUTO_CONFIRMADO]', '')
+          .replace('CONFIRM_YES:', '')
+          .trim();
         if (nomeProduto.includes('Sim, é esse')) nomeProduto = 'Produto Anterior';
 
         textoParaHistorico = `Sim, é esse! Produto: ${nomeProduto}`;
@@ -229,7 +241,11 @@ Quer dar uma olhada nessa sugestão ou prefere fechar o pedido agora?
       }
 
       // 2. Botão de Ver Sugestão (Upsell)
-      else if (textoFinal?.includes('VER_SUGESTAO_') || textoFinal?.includes('[VER_SUGESTAO]') || textoMinusculo.includes('ver sugestão')) {
+      else if (
+        textoFinal?.includes('VER_SUGESTAO_') ||
+        textoFinal?.includes('[VER_SUGESTAO]') ||
+        textoMinusculo.includes('ver sugestão')
+      ) {
         // Extrai o nome do produto que veio do botão
         let termoSugerido = '';
         if (textoFinal.includes('VER_SUGESTAO_')) {
@@ -238,7 +254,9 @@ Quer dar uma olhada nessa sugestão ou prefere fechar o pedido agora?
           termoSugerido = textoFinal.replace(/\[VER_SUGESTAO\]/g, '').trim();
         }
 
-        console.log(`[DEBUG INTERCEPTADOR] Cliente clicou em ver sugestão. Termo capturado: "${termoSugerido}"`);
+        console.log(
+          `[DEBUG INTERCEPTADOR] Cliente clicou em ver sugestão. Termo capturado: "${termoSugerido}"`,
+        );
 
         textoParaHistorico = 'Quero ver a sugestão que você me deu.';
 
@@ -254,7 +272,11 @@ NÃO busque o produto anterior (que já está no carrinho).`;
       }
 
       // 3. Botão de Ver Outros (Recusou ou quer mais opções)
-      else if (textoFinal?.includes('CONFIRM_NO') || textoMinusculo.includes('ver outros') || textoMinusculo.includes('outras opções')) {
+      else if (
+        textoFinal?.includes('CONFIRM_NO') ||
+        textoMinusculo.includes('ver outros') ||
+        textoMinusculo.includes('outras opções')
+      ) {
         textoParaHistorico = 'Quero ver outras opções.';
         textoFinal = `[FORCAR_BUSCA]
 O cliente quer ver OUTRAS opções da categoria que ele estava olhando.
@@ -262,7 +284,11 @@ Gere os argumentos e chame a ferramenta listar_produtos AGORA buscando mais alte
       }
 
       // 4. Botão de Finalizar Pedido
-      else if (textoFinal?.includes('CONFIRM_CHECKOUT') || textoFinal?.includes('[FINALIZAR_PEDIDO]') || textoMinusculo.includes('finalizar pedido')) {
+      else if (
+        textoFinal?.includes('CONFIRM_CHECKOUT') ||
+        textoFinal?.includes('[FINALIZAR_PEDIDO]') ||
+        textoMinusculo.includes('finalizar pedido')
+      ) {
         const carrinhoTexto = (session.carrinho || []).join(', ');
         textoParaHistorico = 'Quero finalizar o pedido.';
         textoFinal = `[FINALIZAR_PEDIDO] 
@@ -281,7 +307,7 @@ Carrinho atual: ${carrinhoTexto}.
           id: dbSession.id,
           sessionKey: sKey,
           lastMessage: textoParaHistorico,
-          role: 'USER'
+          role: 'USER',
         });
       }
 
@@ -289,8 +315,8 @@ Carrinho atual: ${carrinhoTexto}.
         data: {
           sessionId: dbSession.id, // Usa a variável dbSession que criamos no início do arquivo
           role: 'USER',
-          content: textoParaHistorico
-        }
+          content: textoParaHistorico,
+        },
       });
 
       const aiResponse = await iaService.generateResponse(session, textoFinal, history);
@@ -305,11 +331,14 @@ Carrinho atual: ${carrinhoTexto}.
 
         await prisma.chatSession.upsert({
           where: { sessionKey: sKey },
-          create: { sessionKey: sKey, customerName, isActive: false, handoffRequestedAt: new Date() },
+          create: {
+            sessionKey: sKey,
+            customerName,
+            isActive: false,
+            handoffRequestedAt: new Date(),
+          },
           update: { isActive: false, customerName, handoffRequestedAt: new Date() },
         });
-
-
 
         await adminNotificationQueue.add('handoff-request', {
           sessionKey: sKey,
@@ -354,14 +383,15 @@ Carrinho atual: ${carrinhoTexto}.
           .replace(imgRegex, '')
           .replace(confirmTagParaLimpar, '')
           .replace(toolTagRegex, '')
-          .replace(/\[SUGESTAO:(.*?)\]/gi, '')   // Limpa o normal
-          .replace(/\[SUGGESTAO:(.*?)\]/gi, '')  // Limpa o erro de ortografia da IA
+          .replace(/\[SUGESTAO:(.*?)\]/gi, '') // Limpa o normal
+          .replace(/\[SUGGESTAO:(.*?)\]/gi, '') // Limpa o erro de ortografia da IA
           .replace(/;/g, '') // Remove possíveis pontos e vírgulas perdidos pela IA
           .replace(/\[PIX:(.*?)\]/gi, '')
           .trim();
 
         // 3. Agora sim, isso só será True se a IA gerou a tag ou fez a pergunta
-        const hasUpsellButtons = produtoSugerido !== '' || finalContent.toLowerCase().includes('dar uma olhada');
+        const hasUpsellButtons =
+          produtoSugerido !== '' || finalContent.toLowerCase().includes('dar uma olhada');
         finalContent = finalContent.replace(/\[BOTOES_UPSELL\]/g, '').trim();
 
         if (finalContent) {
@@ -372,30 +402,31 @@ Carrinho atual: ${carrinhoTexto}.
               id: dbSession.id, // 👉 ENVIANDO O ID REAL DO PRISMA AQUI TAMBÉM
               sessionKey: sKey,
               lastMessage: finalContent,
-              role: 'ASSISTANT'
+              role: 'ASSISTANT',
             });
           }
         }
 
         // Persiste no Prisma em background...
         // Persiste a resposta da IA no Prisma em background...
-        prisma.chatSession.upsert({
-          where: { sessionKey: sKey },
-          create: { sessionKey: sKey, customerName, isActive: true },
-          update: { customerName, updatedAt: new Date() }, // Atualiza a hora da sessão
-        }).then((sessaoAtualizada) =>
-
-          // 👉 CORREÇÃO 2: Cria apenas a mensagem da IA, pois a do cliente já foi salva!
-          prisma.chatMessage.create({
-            data: {
-              sessionId: sessaoAtualizada.id,
-              role: 'ASSISTANT',
-              content: aiResponse.content || '',
-              tokens: aiResponse.tokens
-            }
+        prisma.chatSession
+          .upsert({
+            where: { sessionKey: sKey },
+            create: { sessionKey: sKey, customerName, isActive: true },
+            update: { customerName, updatedAt: new Date() }, // Atualiza a hora da sessão
           })
-
-        ).catch((e) => console.error('[Prisma Background Error]:', e));
+          .then((sessaoAtualizada) =>
+            // 👉 CORREÇÃO 2: Cria apenas a mensagem da IA, pois a do cliente já foi salva!
+            prisma.chatMessage.create({
+              data: {
+                sessionId: sessaoAtualizada.id,
+                role: 'ASSISTANT',
+                content: aiResponse.content || '',
+                tokens: aiResponse.tokens,
+              },
+            }),
+          )
+          .catch((e) => console.error('[Prisma Background Error]:', e));
 
         // LÓGICA DE ENVIO MULTIMÍDIA E BOTÕES
         if (productName) {
@@ -407,24 +438,21 @@ Carrinho atual: ${carrinhoTexto}.
             [
               { id: `CONFIRM_YES:${productName}`, title: '✅ Sim, é esse!' },
               { id: `CONFIRM_NO_${Date.now()}`, title: '🔄 Ver outros' },
-              { id: `CONFIRM_CHECKOUT_${Date.now()}`, title: '🛒 Finalizar pedido' }
-            ]
+              { id: `CONFIRM_CHECKOUT_${Date.now()}`, title: '🛒 Finalizar pedido' },
+            ],
           );
         } else if (hasUpsellButtons) {
           // Cenário 2: Upsell BLINDADO (Se a frase estiver no texto, os botões aparecem)
 
           // Se a IA não gerou a tag, mandamos um Fallback pro Webhook não quebrar
-          const idBotaoSugestao = produtoSugerido ? `VER_SUGESTAO_${produtoSugerido}` : `VER_SUGESTAO_FALLBACK`;
+          const idBotaoSugestao = produtoSugerido
+            ? `VER_SUGESTAO_${produtoSugerido}`
+            : `VER_SUGESTAO_FALLBACK`;
 
-          await whatsapp.sendInteractiveImageMessage(
-            sKey,
-            finalContent,
-            '',
-            [
-              { id: idBotaoSugestao, title: '👀 Ver sugestão' },
-              { id: `CONFIRM_CHECKOUT_${Date.now()}`, title: '🛒 Finalizar pedido' }
-            ]
-          );
+          await whatsapp.sendInteractiveImageMessage(sKey, finalContent, '', [
+            { id: idBotaoSugestao, title: '👀 Ver sugestão' },
+            { id: `CONFIRM_CHECKOUT_${Date.now()}`, title: '🛒 Finalizar pedido' },
+          ]);
         } else {
           // Cenário 3: Mensagem normal
           for (const imgUrl of imagesToSend) {
@@ -437,13 +465,11 @@ Carrinho atual: ${carrinhoTexto}.
             await whatsapp.sendTextMessage(sKey, pixCode);
             console.log(`[WhatsApp] 💸 Código PIX enviado separado para ${sKey}`);
           }
-
         }
         console.log(`[WhatsApp] ✅ Resposta enviada para ${sKey}`);
       }
 
       console.log(`🏁 [Worker] Job ${job.id} finalizado.`);
-
     } catch (error) {
       console.error(`❌ [Worker] Falha no Job ${job.id}:`, error);
       throw error;
@@ -457,11 +483,9 @@ Carrinho atual: ${carrinhoTexto}.
     connection: redis as any,
     lockDuration: 60000,
     lockRenewTime: 20000,
-  }
+  },
 );
 
-chatbotWorker.on('failed', (job, err) =>
-  console.error(`🚨 [Worker] Job ${job?.id} falhou:`, err));
+chatbotWorker.on('failed', (job, err) => console.error(`🚨 [Worker] Job ${job?.id} falhou:`, err));
 
-chatbotWorker.on('completed', (job) =>
-  console.log(`✅ [Worker] Job ${job.id} concluído.`));
+chatbotWorker.on('completed', (job) => console.log(`✅ [Worker] Job ${job.id} concluído.`));

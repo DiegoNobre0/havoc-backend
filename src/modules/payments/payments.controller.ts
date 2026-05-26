@@ -18,7 +18,7 @@ export class PaymentsController {
     return reply.status(201).send(payment);
   }
 
-  async checkStatus(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {    
+  async checkStatus(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
     const payment = await this.service.getPaymentStatus(request.params.id);
     return reply.send(payment);
   }
@@ -26,20 +26,36 @@ export class PaymentsController {
   // ─── ROTA ABERTA PARA O MERCADO PAGO BATER ───
   async webhook(request: FastifyRequest, reply: FastifyReply) {
     const body: any = request.body;
-    
-    if (body?.action === 'payment.created' || body?.action === 'payment.updated') {
-      const paymentId = body.data?.id;
+    const headers = request.headers; // 👉 CAPTURA OS HEADERS AQUI
+
+    // O MP pode enviar a notificação usando "action" ou "type" ou "topic"
+    const actionType = body?.action || body?.type || body?.topic;
+
+    if (
+      actionType === 'payment.created' ||
+      actionType === 'payment.updated' ||
+      actionType === 'payment'
+    ) {
+      const paymentId = body?.data?.id || body?.resource;
+
       if (paymentId) {
-        // 🔥 Joga para o BullMQ processar assincronamente 🔥
-        await paymentQueue.add('process-mp-webhook', { paymentId }, {
-          removeOnComplete: true,
-          attempts: 3, // Se falhar, tenta de novo 3 vezes
-          backoff: { type: 'exponential', delay: 2000 }
-        });
+        // 🔥 Joga o BODY e os HEADERS para o BullMQ processar assincronamente 🔥
+        await paymentQueue.add(
+          'process-mp-webhook',
+          {
+            body,
+            headers, // 👉 Repassando a chave de segurança para o worker
+          },
+          {
+            removeOnComplete: true,
+            attempts: 3, // Se falhar, tenta de novo 3 vezes
+            backoff: { type: 'exponential', delay: 2000 },
+          },
+        );
       }
     }
 
     // Devolve 200 imediatamente para o MP não bloquear nossa API
-    return reply.status(200).send('OK'); 
+    return reply.status(200).send('OK');
   }
 }

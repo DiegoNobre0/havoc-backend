@@ -26,7 +26,7 @@ export class IAService {
   private async executeTool(
     name: string,
     args: any,
-    session: any
+    session: any,
   ): Promise<{ result: string; handoff: boolean; extractedTags: string }> {
     let result = '';
     let handoff = false;
@@ -36,7 +36,6 @@ export class IAService {
 
     try {
       if (name === 'listar_produtos') {
-
         await this.chatbotService.updateSessionStatus(sessionKey, 'EM_ANDAMENTO');
 
         const resultText = await this.contextHelper.listarProdutos(args.termo_busca);
@@ -44,21 +43,24 @@ export class IAService {
         const nomesEncontrados: string[] = [];
 
         const linhas = resultText.split('\n');
-        linhas.forEach(linha => {
+        linhas.forEach((linha) => {
           // Regex flexível: Pega o número e o nome do produto, ignorando marcações
           const match = linha.match(/\*?(\d+)\.\s+([^\*]+)/);
           if (match) nomesEncontrados.push(match[2].trim());
-        })
+        });
 
         if (nomesEncontrados.length > 0) {
           await (redis as any).set(
             `lista_produtos:${sessionKey}`,
             JSON.stringify(nomesEncontrados),
-            'EX', 300
+            'EX',
+            300,
           );
         }
 
-        result = resultText + '\n\n⚠️ [INSTRUÇÃO DO SISTEMA]: Apresente os resultados de forma animada. ⚠️ REGRA ABSOLUTA: Repasse os produtos listados acima EXATAMENTE como estão, MANTENDO os números das opções (1., 2., etc) para o cliente poder escolher. NUNCA junte categorias ou altere a formatação.';
+        result =
+          resultText +
+          '\n\n⚠️ [INSTRUÇÃO DO SISTEMA]: Apresente os resultados de forma animada. ⚠️ REGRA ABSOLUTA: Repasse os produtos listados acima EXATAMENTE como estão, MANTENDO os números das opções (1., 2., etc) para o cliente poder escolher. NUNCA junte categorias ou altere a formatação.';
       } else if (name === 'ver_detalhes_do_produto') {
         const rawResult = await this.contextHelper.verDetalhesProduto(args.nome_produto);
 
@@ -66,7 +68,9 @@ export class IAService {
 
         // Se não encontrou o produto, avisa a IA e proíbe ela de tentar vender o fantasma
         if (rawResult.includes('não foi encontrado')) {
-          result = rawResult + '\n\n⚠️ INSTRUÇÃO DO SISTEMA: O item buscado não foi encontrado no estoque. Avise o cliente de forma amigável e pergunte se ele quer ver outras opções. NÃO pergunte "o que achou desse?".';
+          result =
+            rawResult +
+            '\n\n⚠️ INSTRUÇÃO DO SISTEMA: O item buscado não foi encontrado no estoque. Avise o cliente de forma amigável e pergunte se ele quer ver outras opções. NÃO pergunte "o que achou desse?".';
         } else {
           // Lógica normal de exibir o produto
           const imgMatch = rawResult.match(/\[IMG:(.*?)\]/);
@@ -75,7 +79,10 @@ export class IAService {
           if (confirmMatch) extractedTags += `[CONFIRM:${confirmMatch[1]}]\n`;
 
           // 1. Limpa as tags para a IA não vê-las
-          const cleanProductData = rawResult.replace(/\[IMG:(.*?)\]/g, '').replace(/\[CONFIRM:(.*?)\]/g, '').trim();
+          const cleanProductData = rawResult
+            .replace(/\[IMG:(.*?)\]/g, '')
+            .replace(/\[CONFIRM:(.*?)\]/g, '')
+            .trim();
 
           // 2. Trava absoluta de comportamento
           // 2. Trava absoluta de comportamento
@@ -87,7 +94,6 @@ export class IAService {
         }
       } else if (name === 'calcular_frete') {
         result = `Frete para ${args.cep_ou_endereco}: R$ 15,00 via Motoboy, entrega no mesmo dia.`;
-
       } else if (name === 'gerar_resumo_e_checkout') {
         const rawResult = await this.contextHelper.gerarCheckout(sessionKey, args);
 
@@ -102,37 +108,36 @@ export class IAService {
         if (pixMatch) extractedTags += `[PIX:${pixMatch[1]}]\n`;
 
         // Limpa as tags para a IA não se confundir
-        const cleanResult = rawResult.replace(/\[IMG:(.*?)\]/g, '').replace(/\[PIX:(.*?)\]/g, '').trim();
+        const cleanResult = rawResult
+          .replace(/\[IMG:(.*?)\]/g, '')
+          .replace(/\[PIX:(.*?)\]/g, '')
+          .trim();
 
         result = `${cleanResult}\n\n⚠️ INSTRUÇÃO DO SISTEMA: Repasse o texto do resumo da compra EXATAMENTE como está.`;
-
       } else if (name === 'solicitar_atendimento_humano') {
         await this.chatbotService.updateSessionStatus(sessionKey, 'ATENDIMENTO_HUMANO');
         handoff = true;
         result = 'Ação concluída. Humano notificado.';
-
-      }
-      else if (name === 'listar_kits_promocionais') {
+      } else if (name === 'listar_kits_promocionais') {
         const resultText = await this.contextHelper.getPromoKitsContext();
         await this.chatbotService.updateSessionStatus(sessionKey, 'EM_ANDAMENTO');
-        result = resultText + '\n\n⚠️ [INSTRUÇÃO DO SISTEMA]: Copie e apresente os kits promocionais acima para o cliente com muita energia. NUNCA invente combos. Após mostrar, pergunte qual combo ele quer garantir!';
-      }
-      else if (name === 'remover_item_carrinho') {
+        result =
+          resultText +
+          '\n\n⚠️ [INSTRUÇÃO DO SISTEMA]: Copie e apresente os kits promocionais acima para o cliente com muita energia. NUNCA invente combos. Após mostrar, pergunte qual combo ele quer garantir!';
+      } else if (name === 'remover_item_carrinho') {
         result = await this.contextHelper.removerProdutoDoCarrinho(session, args.nome_produto);
-      }
-      else if (name === 'cancelar_pedido_e_sessao') {
+      } else if (name === 'cancelar_pedido_e_sessao') {
         result = await this.contextHelper.cancelarAtendimento(sessionKey);
         // Aqui podemos resetar o carrinho no Redis também
         session.carrinho = [];
-      }
-      else if (name === 'confirmar_recebimento_cliente') {
+      } else if (name === 'confirmar_recebimento_cliente') {
         // 1. Busca o último pedido em andamento desse telefone
         const ultimoPedido = await prisma.order.findFirst({
           where: {
             customerPhone: sessionKey,
-            status: { in: ['PENDING', 'PROCESSING', 'SHIPPED', 'CONFIRMED'] }
+            status: { in: ['PENDING', 'PROCESSING', 'SHIPPED', 'CONFIRMED'] },
           },
-          orderBy: { createdAt: 'desc' }
+          orderBy: { createdAt: 'desc' },
         });
 
         if (ultimoPedido) {
@@ -142,16 +147,19 @@ export class IAService {
             data: {
               status: 'DELIVERED',
               statusHistory: {
-                create: { status: 'DELIVERED', note: 'Entrega confirmada automaticamente pelo cliente via WhatsApp' }
-              }
-            }
+                create: {
+                  status: 'DELIVERED',
+                  note: 'Entrega confirmada automaticamente pelo cliente via WhatsApp',
+                },
+              },
+            },
           });
         }
 
         // 3. Atualiza o status do Chat para Finalizado e devolve o controle pra IA
         await prisma.chatSession.update({
           where: { sessionKey },
-          data: { status: 'FINALIZADO', isActive: true }
+          data: { status: 'FINALIZADO', isActive: true },
         });
 
         // 4. Limpa a memória RAM/Redis do Chatbot (Garante o reset completo do carrinho)
@@ -160,11 +168,13 @@ export class IAService {
         await redis.del(workerSessionKey);
         await redis.del(workerHistoryKey);
 
-        console.log(`[Auto-Fulfillment] 📦 Pedido ${ultimoPedido?.code || 'N/A'} finalizado pelo cliente.`);
+        console.log(
+          `[Auto-Fulfillment] 📦 Pedido ${ultimoPedido?.code || 'N/A'} finalizado pelo cliente.`,
+        );
 
-        result = "Ação concluída. O pedido foi marcado como entregue com sucesso e o chat foi arquivado. Agora, agradeça ao cliente com muito entusiasmo e deseje ótimos treinos!";
-      }
-      else {
+        result =
+          'Ação concluída. O pedido foi marcado como entregue com sucesso e o chat foi arquivado. Agora, agradeça ao cliente com muito entusiasmo e deseje ótimos treinos!';
+      } else {
         result = `Ferramenta "${name}" não reconhecida.`;
       }
     } catch (e) {
@@ -213,14 +223,14 @@ export class IAService {
 1. IGNORE completamente textos genéricos de embalagem, pesos e avisos (como 'powder', 'dietary supplement', 'net wt', 'flavor', 'advanced formula').
 2. TRADUZA a categoria do produto para o padrão brasileiro (Exemplo: se ler 'Pre-Workout', escreva 'Pre Treino'. Se ler 'Fat Burner', escreva 'Termogenico').
 3. Retorne uma string limpa de no máximo 4 a 5 palavras para ser usada em um banco de dados relacional.
-Exemplo de saída perfeita: 'Nuclear Rush Pre Treino Body Action' ou 'Kit Creatina Black Skull'.`
+Exemplo de saída perfeita: 'Nuclear Rush Pre Treino Body Action' ou 'Kit Creatina Black Skull'.`,
               },
               {
                 type: 'image_url',
-                image_url: { url: `data:image/jpeg;base64,${base64Image}` }
-              }
-            ]
-          }
+                image_url: { url: `data:image/jpeg;base64,${base64Image}` },
+              },
+            ],
+          },
         ],
         temperature: 0.1, // Temperatura bem baixa para ele não alucinar e ser preciso
       });
@@ -235,11 +245,13 @@ Exemplo de saída perfeita: 'Nuclear Rush Pre Treino Body Action' ou 'Kit Creati
   async generateResponse(
     session: { id: string; sessionKey: string; customerName?: string },
     userMessage: string,
-    history: Array<{ role: string; content: string }>
+    history: Array<{ role: string; content: string }>,
   ): Promise<AIResponse> {
     const config = await prisma.chatbotConfig.findFirst({ where: { isActive: true } });
 
-    const horaAtual = parseInt(new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "numeric" }));
+    const horaAtual = parseInt(
+      new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: 'numeric' }),
+    );
     let saudacao = 'Bom dia';
     if (horaAtual >= 12 && horaAtual < 18) saudacao = 'Boa tarde';
     else if (horaAtual >= 18 || horaAtual < 5) saudacao = 'Boa noite';
@@ -248,9 +260,7 @@ Exemplo de saída perfeita: 'Nuclear Rush Pre Treino Body Action' ou 'Kit Creati
     const isPrimeiroContato = history.length === 0;
 
     // Pega o primeiro nome, se existir, senão fica vazio
-    const primeiroNome = session.customerName
-      ? session.customerName.split(' ')[0]
-      : '';
+    const primeiroNome = session.customerName ? session.customerName.split(' ')[0] : '';
 
     // Se tivermos o nome, a Carol fala. Se não, ela é mais genérica.
     const falaInicial = primeiroNome
@@ -269,7 +279,6 @@ Exemplo de saída perfeita: 'Nuclear Rush Pre Treino Body Action' ou 'Kit Creati
         NÃO faça novas saudações. É ESTRITAMENTE PROIBIDO dizer "Olá", "Bom dia" ou "Que bom ter você de volta" no meio da conversa.
         ⚠️ REGRA SUPREMA: Se a última mensagem do cliente foi perguntando preço, estoque ou pedindo um produto direto (ex: "Quanto tá a creatina?"), ABANDONE O FUNIL de perguntas e chame a ferramenta de busca IMEDIATAMENTE.
       `;
-
     const basePrompt = `
 Você é a Carol, a principal consultora especialista da Havoc Suplementos.
 Sua personalidade: Jovem, atlética, extremamente simpática, com alta energia e foco em ajudar o cliente a alcançar seus resultados. Você fala de forma natural e humanizada, como uma amiga do WhatsApp (mas sempre profissional).
@@ -278,62 +287,70 @@ Sua personalidade: Jovem, atlética, extremamente simpática, com alta energia e
 1. Limite de texto: Máximo de 3 a 4 linhas curtas por mensagem. Seja direta.
 2. Formatação: Use emojis com bom senso. Para negrito, use apenas UM asterisco de cada lado (ex: *Whey Protein*). NUNCA use duplos (**).
 3. Anti-Alucinação: Você NÃO tem permissão para inventar preços, produtos, fretes ou estoques. Se não tem no sistema, não existe.
-4. O FUNIL É SUA BÍBLIA (COM EXCEÇÕES): Siga as Etapas 1 e 2 APENAS para clientes indecisos (ex: "quero emagrecer" ou "preciso de suplemento").
+4. O FUNIL É SUA BÍBLIA (COM EXCEÇÕES): Siga as Etapas 1 e 2 APENAS para clientes indecisos.
 
-🚀 A VIA EXPRESSA (CLIENTE DECIDIDO E FOTOS - FUJA DO FUNIL):
-- Se o cliente perguntar o preço, disponibilidade ou pedir um produto específico EM QUALQUER MOMENTO (ex: "Quanto tá a creatina?", "Tem whey?", "Quero o combo X") OU enviar uma FOTO:
-- ⚠️ ABANDONE AS ETAPAS 1 E 2 IMEDIATAMENTE! O cliente já sabe o que quer. É ESTRITAMENTE PROIBIDO fazer perguntas sobre objetivos ou nível de experiência nesse momento.
-- Ação Imediata: Chame a ferramenta 'listar_produtos' ou 'listar_kits_promocionais' AGORA MESMO buscando pela raiz da palavra (ex: "creatin").
+💬 COMPORTAMENTOS DINÂMICOS (BASEADO EM CONVERSAS REAIS DA LOJA):
 
-🛑 PROTOCOLOS DE SAÚDE E RESTRIÇÃO (VERIFICAÇÃO OBRIGATÓRIA):
-- PROTOCOLO TERMOGÊNICO: Se o cliente pedir termogênico, queimador ou emagrecedor, ANTES de listar, pergunte: "Para eu te indicar a melhor opção, você tem pressão alta, insônia ou ansiedade?". (PARE E AGUARDE A RESPOSTA).
-  > Se ele responder que SIM (tem problemas): Chame a ferramenta 'listar_produtos' buscando APENAS por "L-Carnitina".
-  > Se ele responder que NÃO (tudo ok): Chame a ferramenta 'listar_produtos' buscando por "Emagrecimento". NUNCA invente nomes como "Termogênico A".
-- PROTOCOLO LACTOSE: Se o cliente citar intolerância à lactose, chame a ferramenta 'listar_produtos' buscando por Proteína Isolada ou Beef Protein. NUNCA indique Whey Concentrado.
+- CLIENTES DE ANÚNCIOS (Meta Ads): A mensagem do anúncio já vem com o nome do produto de interesse (ex: "Tenho interesse no Whey X"). Receba o cliente com muita energia, confirme o produto que ele citou na mensagem e já puxe o assunto para mostrar os detalhes, tirando dúvidas ou chamando 'listar_produtos' para aquela categoria.
+- ORÇAMENTOS E LISTAS (MODO CONSULTORIA PASSO A PASSO): Se o cliente enviar uma lista de produtos, NÃO envie orçamentos gigantes e não liste tudo de uma vez. Siga este fluxo exato:
+  1. Reconhecimento: Avise que viu a lista, informe o que temos e seja transparente se algo estiver em falta. Pergunte se ele quer ver os valores. (Exemplo: "Opa, maravilha! Tenho esses produtos disponíveis aqui na loja (só vou ficar te devendo o Ômega 3 no momento). Gostaria de consultar os valores e as opções de marcas para a gente ir montando seu pedido?").
+  2. Construção Guiada: Se ele disser "Sim", trabalhe UM PRODUTO POR VEZ. Chame 'listar_produtos' para o PRIMEIRO item da lista (ex: Whey) e mostre as opções para ele escolher. 
+  3. Memória de Carrinho: Assim que ele escolher a marca do primeiro item, elogie a escolha e passe imediatamente para o SEGUNDO item da lista, e assim por diante. (Ex: "Excelente escolha! Agora sobre a Creatina, temos essas opções...").
+  4. Fechamento: Só inicie a ETAPA 6 (Checkout) quando tiver percorrido todos os itens da lista do cliente. Se ele perguntar de marcas que não temos (ex: Growth), diga que temos opções com tabela nutricional idêntica e tão boas quanto, e mostre as nossas.
+- RESERVA DE PRODUTOS: Se o cliente perguntar se pode deixar reservado para pegar outro dia, informe a regra da loja: "Para deixarmos o seu produto reservado e garantido, pedimos apenas que o pagamento seja feito antecipadamente via Pix. Quer que eu gere a chave pra você?".
 
-🛑 GESTÃO DE ERROS E DESISTÊNCIA:
-- Se o cliente pedir para tirar algo DO CARRINHO (ex: "tira o whey", "errei o produto"): Chame 'remover_item_carrinho'.
-- Se o cliente APENAS REJEITAR a lista (ex: "não quero essas", "nenhuma", "não gostei"): NÃO remova nada. Pergunte qual marca/sabor ele prefere ou chame 'listar_produtos' buscando alternativas.
-- Se o cliente disser "cancela tudo", "desisto": Chame 'cancelar_pedido_e_sessao'.
-- 🚀 CONFIRMAÇÃO DE ENTREGA (MUITO IMPORTANTE): Se o cliente mandar mensagem avisando que o produto chegou, que já recebeu ou agradecendo pela entrega (ex: "Chegou aqui!", "Acabei de receber, valeu", "O motoboy entregou"), chame IMEDIATAMENTE a ferramenta 'confirmar_recebimento_cliente'. Não faça perguntas extras, apenas execute a ferramenta e agradeça com muita energia desejando ótimos treinos!
+🚚 PERGUNTAS FREQUENTES (RESPONDA NA HORA, DEPOIS VOLTE AO FLUXO):
+- "Vocês fazem entrega?": Sim, fazemos entrega via motoboy!
+- "Paga na hora que recebe?": Sim, você pode fazer o pagamento na hora que o motoboy entregar (aceitamos Pix, Cartão ou Dinheiro).
+- "Qual o valor da entrega para X?": Peça o endereço certinho com ponto de referência para calcular.
+
+🛑 PROTOCOLOS DE SAÚDE E RESTRIÇÃO:
+- PROTOCOLO TERMOGÊNICO: Se o cliente pedir emagrecedor/termogênico, ANTES de listar, pergunte: "Para eu te indicar a melhor opção, você tem pressão alta, insônia ou ansiedade?". (PARE E AGUARDE). Se SIM: Busque "L-Carnitina". Se NÃO: Busque "Emagrecimento".
+- PROTOCOLO LACTOSE: Se o cliente citar intolerância à lactose, diga APENAS: "Temos ótimas opções sem lactose: Whey Isolado, Albumina ou Beef Protein (Proteína da carne). Qual dessas opções você prefere?". (PARE E AGUARDE a resposta antes de buscar).
+
+🛑 PROTOCOLOS DE ESTOQUE E SUBSTITUIÇÕES:
+- PROTOCOLO BETA-ALANINA: Se não houver Beta-Alanina isolada, sugira um Pré-Treino (pois já contém na fórmula). Se topar, busque por "treino".
+- 🚫 BCAA PROIBIDO: Não vendemos BCAA. Não ofereça. Sugira Whey ou Creatina no lugar.
+
+💡 DÚVIDAS E MODO DE USO:
+- Se perguntarem a finalidade (ex: enviou foto do Trinka Abdômen e perguntou pra que serve) ou como tomar, responda primeiro a dúvida de forma clara e especialista, e só DEPOIS engate a pergunta do funil (Ex: "Esse termogênico é excelente para acelerar a queima de gordura! Você já usa alguma suplementação hoje?").
+
+🛑 GESTÃO DE ERROS E AJUDA HUMANA:
+- Se pedir ajuda humana, se irritar ou tiver um problema complexo, chame a ferramenta 'solicitar_atendimento_humano' e envie: https://wa.me/5571999999999.
+- Se pedir para tirar do carrinho: Chame 'remover_item_carrinho'.
+- Rejeição de lista: Não remova nada. Pergunte qual marca/sabor prefere.
+- "Cancela tudo": Chame 'cancelar_pedido_e_sessao'.
+- "Chegou / Recebi": Chame IMEDIATAMENTE 'confirmar_recebimento_cliente'.
 
 🚀 ATALHO MULTIMODAL E KITS:
-- Imagem: Se o sistema avisar que o cliente enviou uma foto, agradeça a foto, mas SEGURE A VENDA. Faça as Etapas 1 e 2 antes de dar os detalhes do produto da foto.
-- Combos: Se o cliente pedir "promoção", "kit" ou "combo", use a ferramenta 'listar_kits_promocionais' APENAS QUANDO chegar na Etapa 3.
+- Imagem de Produto: Responda a dúvida sobre o produto da foto ANTES de tentar vender.
+- Promoção/Kit: Se pedir promoções, use 'listar_kits_promocionais'.
 
 ---
-🎯 FUNIL DE VENDAS HAVOC (SIGA A ORDEM EXATA APENAS SE O CLIENTE FOR INDECISO):
+🎯 FUNIL DE VENDAS HAVOC (USE PARA CLIENTES INDECISOS):
 
-ETAPA 1 — DESCOBERTA DO OBJETIVO:
-Se o cliente chegar dizendo apenas "oi", "bom dia" ou "quero suplemento" (sem especificar qual), puxe a pergunta do objetivo.
-- Como fazer: "Para eu te direcionar a melhor opção, seu foco principal hoje é ganho de massa, emagrecimento ou mais energia pro treino?" (PARE AQUI).
+ETAPA 1 — OBJETIVO:
+Se disser apenas "oi" ou "quero suplemento", pergunte: "Para eu te direcionar a melhor opção, seu foco principal hoje é ganho de massa, emagrecimento ou mais energia pro treino?" (PARE AQUI).
 
-ETAPA 2 — NÍVEL DE EXPERIÊNCIA:
-Assim que ele responder o objetivo, descubra o nível dele.
-- Como fazer: "Show de bola! E me conta, você já treina e usa suplementos ou tá começando agora?" (PARE AQUI).
+ETAPA 2 — EXPERIÊNCIA:
+Após o objetivo: "Show de bola! E me conta, você já treina e usa suplementos ou tá começando agora?" (PARE AQUI).
 
-ETAPA 3 — APRESENTAÇÃO (PROTOCOLOS ESPECÍFICOS):
-Agora sim você mostra os produtos, dependendo da resposta da Etapa 2:
-- PROTOCOLO EXPERIENTE (já usa): "Massa! Você tem preferência por alguma marca (tipo Black Skull, Dux) ou quer que eu te mostre nossas opções?" -> Após ele responder, chame a ferramenta 'listar_produtos' COMBINANDO o tipo de produto que o cliente quer com a marca informada. (Ex: se ele quer massa magra/proteína e escolheu a marca, busque por "whey black skull").
-- PROTOCOLO INICIANTE (vai começar): Diga APENAS: "Para começar certo, o ideal é: 💪 Whey, ⚡ Creatina e 🔄 BCAA. Posso te mostrar as opções?" -> Se ele responder "Sim", chame 'listar_produtos' APENAS para o produto principal que ele pediu lá no início (ex: "whey").
+ETAPA 3 — APRESENTAÇÃO:
+- EXPERIENTE: "Massa! Você tem preferência por alguma marca ou quer ver nossas opções?" -> Após resposta, chame 'listar_produtos' COMBINANDO produto e marca.
+- INICIANTE: Diga: "Para começar certo, o ideal é: 💪 Whey e ⚡ Creatina. Posso te mostrar as opções?" -> Se "Sim", busque o produto.
 
-ETAPA 4 — DETALHES E BOTÕES (Gatilho de Compra):
-O cliente escolheu um item da lista ou confirmou a foto?
-- Ação: Chame a ferramenta 'ver_detalhes_do_produto' IMEDIATAMENTE passando o nome do item. Não enrole.
+ETAPA 4 — DETALHES E BOTÕES:
+Cliente escolheu? Chame 'ver_detalhes_do_produto' IMEDIATAMENTE com o nome completo.
 
-ETAPA 5 — UPSELL (A Venda Casada):
-Você receberá uma instrução invisível do sistema informando que o produto foi para o carrinho. Siga EXATAMENTE a instrução de sugerir o complemento.
+ETAPA 5 — UPSELL:
+Siga a instrução invisível para sugerir complemento.
 
-ETAPA 6 — CHECKOUT (Fechamento sem atrito):
-⚠️ REGRA DE OURO: Você DEVE fazer UMA pergunta por vez e OBRIGATORIAMENTE esperar o cliente responder. NUNCA faça duas perguntas na mesma mensagem.
-Siga este fluxo EXATAMENTE nesta ordem de Passos:
-
-- PASSO 1 (Entrega): O sistema vai te avisar que o cliente quer fechar o pedido. Pergunte APENAS: "Perfeito! O pedido vai ser para *Retirada* aqui na loja ou *Entrega*?" (PARE E AGUARDE A RESPOSTA).
-- PASSO 2 (Endereço): 
-  > Se ele responder "Retirada": Vá direto para o Passo 3.
-  > Se ele responder "Entrega": Pergunte APENAS: "Pode me mandar seu endereço completo com bairro para eu calcular a taxa do motoboy?" (PARE E AGUARDE). Assim que ele mandar o endereço, chame a ferramenta 'calcular_frete'.
-- PASSO 3 (Pagamento): Após definir o frete (ou se for retirada), pergunte APENAS: "Tudo certo! O pagamento vai ser no *PIX*, *Cartão* ou *Dinheiro*?" (PARE E AGUARDE).
-- PASSO 4 (Ação Final): APENAS quando você tiver as 3 informações (Produtos, Método de Entrega/Endereço e Método de Pagamento), chame IMEDIATAMENTE a ferramenta 'gerar_resumo_e_checkout'. NUNCA chame essa ferramenta se estiver faltando a forma de pagamento ou a forma de entrega.
+ETAPA 6 — CHECKOUT:
+⚠️ UMA pergunta por vez.
+- PASSO 1 (Entrega): "O pedido vai ser para *Retirada* aqui na loja ou *Entrega*?"
+- PASSO 2 (Endereço): Se Entrega: "Pode me mandar seu endereço completo com bairro, número e um *ponto de referência* para facilitar para o nosso motoboy?" -> Quando ele enviar, chame 'calcular_frete'.
+- PASSO 3 (Pagamento): "Tudo certo! O pagamento vai ser no *PIX*, *Cartão* ou *Dinheiro* na hora que o motoboy entregar?"
+- PASSO 4 (Ação Final): Tendo tudo, chame 'gerar_resumo_e_checkout'.
 `;
 
     const systemPromptFinal = `${basePrompt}\n\n${regraDeSaudacao}`;
@@ -384,7 +401,8 @@ NUNCA envie apenas a marca se você já sabe qual objetivo ou produto o cliente 
         type: 'function',
         function: {
           name: 'ver_detalhes_do_produto',
-          description: 'OBRIGATÓRIO: Você DEVE usar esta ferramenta TODA VEZ que o cliente escolher um produto da lista (ex: digitar "1", "2" ou o nome). ⚠️ REGRA ABSOLUTA: NUNCA responda diretamente usando sua memória da listagem. É a execução desta ferramenta que injeta os botões de compra na tela do cliente. Passe o NOME COMPLETO do produto (ex: "Black Skull Creatine Hardcore 150g"). É estritamente proibido passar apenas números.',
+          description:
+            'OBRIGATÓRIO: Você DEVE usar esta ferramenta TODA VEZ que o cliente escolher um produto da lista (ex: digitar "1", "2" ou o nome). ⚠️ REGRA ABSOLUTA: NUNCA responda diretamente usando sua memória da listagem. É a execução desta ferramenta que injeta os botões de compra na tela do cliente. Passe o NOME COMPLETO do produto (ex: "Black Skull Creatine Hardcore 150g"). É estritamente proibido passar apenas números.',
           parameters: {
             type: 'object',
             properties: { nome_produto: { type: 'string' } },
@@ -396,7 +414,8 @@ NUNCA envie apenas a marca se você já sabe qual objetivo ou produto o cliente 
         type: 'function',
         function: {
           name: 'listar_kits_promocionais',
-          description: 'Busca e lista todos os combos e kits promocionais ativos da loja. Use SEMPRE que o cliente pedir promoções, kits, combos ou ofertas.',
+          description:
+            'Busca e lista todos os combos e kits promocionais ativos da loja. Use SEMPRE que o cliente pedir promoções, kits, combos ou ofertas.',
           parameters: { type: 'object', properties: {} },
         },
       },
@@ -428,7 +447,7 @@ NUNCA envie apenas a marca se você já sabe qual objetivo ou produto o cliente 
           parameters: {
             type: 'object',
             properties: {
-              nome_produto: { type: 'string', description: 'O nome do produto a remover' }
+              nome_produto: { type: 'string', description: 'O nome do produto a remover' },
             },
             required: ['nome_produto'],
           },
@@ -438,7 +457,8 @@ NUNCA envie apenas a marca se você já sabe qual objetivo ou produto o cliente 
         type: 'function',
         function: {
           name: 'cancelar_pedido_e_sessao',
-          description: 'Cancela o pedido atual e limpa o carrinho caso o cliente desista da compra.',
+          description:
+            'Cancela o pedido atual e limpa o carrinho caso o cliente desista da compra.',
           parameters: { type: 'object', properties: {} },
         },
       },
@@ -446,7 +466,8 @@ NUNCA envie apenas a marca se você já sabe qual objetivo ou produto o cliente 
         type: 'function',
         function: {
           name: 'confirmar_recebimento_cliente',
-          description: 'Use esta ferramenta IMEDIATAMENTE quando o cliente confirmar de forma clara que o produto chegou, foi entregue ou que ele já está com ele em mãos (ex: "chegou", "já recebi", "foi entregue", "obrigado, acabei de receber"). Ela finaliza o pedido e o atendimento no sistema.',
+          description:
+            'Use esta ferramenta IMEDIATAMENTE quando o cliente confirmar de forma clara que o produto chegou, foi entregue ou que ele já está com ele em mãos (ex: "chegou", "já recebi", "foi entregue", "obrigado, acabei de receber"). Ela finaliza o pedido e o atendimento no sistema.',
           parameters: { type: 'object', properties: {} },
         },
       },
@@ -454,7 +475,8 @@ NUNCA envie apenas a marca se você já sabe qual objetivo ou produto o cliente 
         type: 'function',
         function: {
           name: 'gerar_resumo_e_checkout',
-          description: 'Finaliza o pedido. SÓ DEVE SER USADO na Etapa 6, APÓS o cliente confirmar Retirada/Entrega e Método de Pagamento. Nunca chame essa ferramenta antes do cliente pedir para fechar o pedido.',
+          description:
+            'Finaliza o pedido. SÓ DEVE SER USADO na Etapa 6, APÓS o cliente confirmar Retirada/Entrega e Método de Pagamento. Nunca chame essa ferramenta antes do cliente pedir para fechar o pedido.',
           parameters: {
             type: 'object',
             properties: {
@@ -515,7 +537,7 @@ NUNCA envie apenas a marca se você já sabe qual objetivo ou produto o cliente 
           const { result, handoff, extractedTags } = await this.executeTool(
             toolCall.function.name,
             args,
-            session
+            session,
           );
 
           if (handoff) requiresHumanHandoff = true;
