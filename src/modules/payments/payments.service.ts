@@ -42,6 +42,8 @@ export class PaymentsService {
       description: `Pedido ${order.code} - Havoc Suplementos`,
       payment_method_id: 'pix',
       external_reference: orderId, // Crucial para vincular o webhook depois
+      // 🔥 A TRAVA AQUI: Força o MP a responder nesta exata URL
+      notification_url: 'https://api.havocsuplementos.shop/payments/webhook',
       payer: {
         email: payerEmail,
         first_name: name,
@@ -100,11 +102,13 @@ export class PaymentsService {
         },
       ],
       external_reference: orderId,
-      // Opcional: Redireciona o cliente de volta pro seu site após pagar
+      // 🔥 A TRAVA AQUI TAMBÉM: Webhook garantido
+      notification_url: 'https://api.havocsuplementos.shop/payments/webhook',
+      // Redireciona o cliente de volta pro seu site após pagar
       back_urls: {
-        success: 'https://havocsuplementos.shop/sucesso',
-        pending: 'https://havocsuplementos.shop/pendente',
-        failure: 'https://havocsuplementos.shop/falha',
+        success: 'https://wa.me/5571981214680?text=Acabei%20de%20pagar%20no%20cartão!',
+        pending: 'https://wa.me/5571981214680?text=Meu%20pagamento%20tá%20em%20análise',
+        failure: 'https://wa.me/5571981214680?text=Deu%20erro%20no%20meu%20cartão,%20me%20ajuda',
       },
       auto_return: 'approved',
     };

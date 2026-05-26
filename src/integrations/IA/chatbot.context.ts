@@ -285,8 +285,6 @@ export class ChatbotContext {
             data: new Date().toLocaleString('pt-BR'),
           };
 
-          // Se for DINHEIRO, imprime na hora porque o motoboy/balcão vai cobrar.
-          // Se for PIX/CARTÃO, NÃO imprime agora. O Webhook do Mercado Pago assumirá isso!
           if (dadosCheckout.metodo_pagamento === 'DINHEIRO') {
             io.emit('imprimir_cupom', cupom);
             console.log(
