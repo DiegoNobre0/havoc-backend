@@ -270,8 +270,7 @@ export class ChatbotContext {
       } else {
         textoResposta += `💵 Pagamento em dinheiro selecionado. Deixe o valor separado para entregar ao motoboy. Precisa de troco?`;
       }
-
-      // 🔥 8. MODO DE TESTE: DISPARA A IMPRESSORA IMEDIATAMENTE 🔥
+      // 🔥 8. IMPRESSÃO DA VIA: Controle Inteligente 🔥
       try {
         if (io) {
           const cupom = {
@@ -286,13 +285,21 @@ export class ChatbotContext {
             data: new Date().toLocaleString('pt-BR'),
           };
 
-          io.emit('imprimir_cupom', cupom);
-          console.log(
-            `[Teste Impressão] 🖨️ Ordem enviada para a impressora: Pedido ${novoPedido.code}`,
-          );
+          // Se for DINHEIRO, imprime na hora porque o motoboy/balcão vai cobrar.
+          // Se for PIX/CARTÃO, NÃO imprime agora. O Webhook do Mercado Pago assumirá isso!
+          if (dadosCheckout.metodo_pagamento === 'DINHEIRO') {
+            io.emit('imprimir_cupom', cupom);
+            console.log(
+              `[Impressão Imediata] 🖨️ Pagamento Físico selecionado. Pedido ${novoPedido.code}`,
+            );
+          } else {
+            console.log(
+              `[Aguardando Pagamento] ⏳ Pedido ${novoPedido.code} retido. Impressão aguardando o Webhook do Mercado Pago.`,
+            );
+          }
         }
       } catch (printError) {
-        console.error('[Erro no teste de impressão]:', printError);
+        console.error('[Erro na emissão do cupom]:', printError);
       }
 
       // 9. Retorna o texto para a Carol
