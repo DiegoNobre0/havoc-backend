@@ -228,16 +228,18 @@ export class ChatbotContext {
       let pixCopiaECola = '';
       let linkPagamento = '';
 
+      const paymentsService = new PaymentsService(); // Instanciando o motor real
+
       if (dadosCheckout.metodo_pagamento === 'PIX') {
-        // Quando for plugar o banco de verdade, você desabrocha esse código:
-        // const paymentsService = new PaymentsService();
-        // const pixData = await paymentsService.generatePix(novoPedido.id, 'cliente@havoc.com.br', customerName);
-        // pixCopiaECola = pixData.pixCode || '';
-        pixCopiaECola = '00020126580014br.gov.bcb.pix... (Pix Fictício de Teste)';
+        const pixData = await paymentsService.generatePix(
+          novoPedido.id,
+          'cliente@havoc.com.br',
+          customerName,
+        );
+        pixCopiaECola = pixData.pixCode || '';
       } else if (dadosCheckout.metodo_pagamento === 'CARTAO') {
-        // const linkData = await paymentsService.generateLink(novoPedido.id);
-        // linkPagamento = linkData.paymentLink || '';
-        linkPagamento = 'https://mpago.la/link-ficticio-teste';
+        const linkData = await paymentsService.generateLink(novoPedido.id);
+        linkPagamento = linkData.paymentLink || '';
       }
 
       // 6. DEVOLVE O TEXTO PRONTO PARA A IA MANDAR PRO CLIENTE

@@ -346,11 +346,13 @@ ETAPA 5 — UPSELL:
 Siga a instrução invisível para sugerir complemento.
 
 ETAPA 6 — CHECKOUT:
-⚠️ UMA pergunta por vez.
-- PASSO 1 (Entrega): "O pedido vai ser para *Retirada* aqui na loja ou *Entrega*?"
-- PASSO 2 (Endereço): Se Entrega: "Pode me mandar seu endereço completo com bairro, número e um *ponto de referência* para facilitar para o nosso motoboy?" -> Quando ele enviar, chame 'calcular_frete'.
-- PASSO 3 (Pagamento): "Tudo certo! O pagamento vai ser no *PIX*, *Cartão* ou *Dinheiro* na hora que o motoboy entregar?"
-- PASSO 4 (Ação Final): Tendo tudo, chame 'gerar_resumo_e_checkout'.
+⚠️ REGRA DE OURO: UMA pergunta por vez. NUNCA faça duas perguntas na mesma mensagem.
+- PASSO 1 (Entrega): Pergunte APENAS: "O pedido vai ser para *Retirada* aqui na loja ou *Entrega*?" e PARE.
+- PASSO 2 (A Bifurcação do Endereço):
+  > SE O CLIENTE ESCOLHEU RETIRADA: ⚠️ PULE ESTE PASSO IMEDIATAMENTE. É TOTALMENTE PROIBIDO pedir endereço. Vá direto para o PASSO 3.
+  > SE O CLIENTE ESCOLHEU ENTREGA: Pergunte: "Pode me mandar seu endereço completo com bairro, número e um *ponto de referência* para o nosso motoboy?". Após ele responder, chame 'calcular_frete'.
+- PASSO 3 (Pagamento): Pergunte: "Tudo certo! O pagamento vai ser no *PIX*, *Cartão* ou *Dinheiro*?". (Se for Retirada, não fale de motoboy aqui).
+- PASSO 4 (Ação Final): Tendo os 3 dados confirmados (Produtos, Método de Entrega e Pagamento), chame 'gerar_resumo_e_checkout'.
 `;
 
     const systemPromptFinal = `${basePrompt}\n\n${regraDeSaudacao}`;
