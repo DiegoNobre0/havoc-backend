@@ -4,7 +4,6 @@ import { redis } from '../../shared/redis/redis.js';
 import { whatsappQueue } from '../../shared/worker/whatsapp.queue.js';
 
 export class WhatsAppWebhookService {
-
   // ─── 1. Verificação de Token e Assinatura ──────────────────
   verifyToken(mode: string, token: string, challenge: string) {
     const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || 'havoc_suplementos_2026';
@@ -22,13 +21,10 @@ export class WhatsAppWebhookService {
       .createHmac('sha256', appSecret)
       .update(rawBody, 'utf8')
       .digest('hex');
-    return crypto.timingSafeEqual(
-      Buffer.from(signature),
-      Buffer.from(`sha256=${expectedHash}`)
-    );
+    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(`sha256=${expectedHash}`));
   }
 
- // ─── 2. Fluxo Principal ────────────────────────────────────
+  // ─── 2. Fluxo Principal ────────────────────────────────────
   async processWebhook(body: any) {
     try {
       const entry = body.entry?.[0];
@@ -47,9 +43,7 @@ export class WhatsAppWebhookService {
       if (!messageData || !businessPhoneNumber) return;
 
       // Deduplicação atômica
-      const dedupe = await redis.set(
-        `processed_msg:${messageData.id}`, '1', 'EX', 300, 'NX'
-      );
+      const dedupe = await redis.set(`processed_msg:${messageData.id}`, '1', 'EX', 300, 'NX');
       if (!dedupe) {
         console.log(`[Webhook] ⚠️ Duplicata ignorada: ${messageData.id}`);
         return;
@@ -73,17 +67,22 @@ export class WhatsAppWebhookService {
 
         await whatsappQueue.add('process-chat-message', {
           sessionKey: parsedMessage.phone,
-          customerName: parsedMessage.customerName, // 👉 Nome indo pra fila!
+          customerName: parsedMessage.customerName,
           message: {
             ...parsedMessage,
             type: 'text',
             content: buttonId.startsWith('CONFIRM_YES:')
               ? `[PRODUTO_CONFIRMADO] ${buttonId.replace('CONFIRM_YES:', '')}`
               : buttonId.startsWith('CONFIRM_CHECKOUT')
-              ? '[FINALIZAR_PEDIDO] Cliente quer finalizar agora.'
-              : buttonId.startsWith('VER_SUGESTAO_')
-                ? `[VER_SUGESTAO] ${buttonId.replace('VER_SUGESTAO_', '')}`
-                : 'Quero ver outras opções',
+                ? '[FINALIZAR_PEDIDO] Cliente quer finalizar agora.'
+                : buttonId.startsWith('VER_SUGESTAO_')
+                  ? `[VER_SUGESTAO] ${buttonId.replace('VER_SUGESTAO_', '')}`
+                  : // 👇 NOVOS BOTÕES DE CONFIRMAÇÃO DE RESUMO 👇
+                    buttonId === 'CONFIRM_FINAL_YES'
+                    ? '[GERAR_CHECKOUT_AGORA] Sim, tudo certo!'
+                    : buttonId === 'CONFIRM_FINAL_NO'
+                      ? 'Não, quero alterar meu pedido.'
+                      : 'Quero ver outras opções',
           },
         });
         return;
@@ -95,7 +94,6 @@ export class WhatsAppWebhookService {
         customerName: parsedMessage.customerName, // 👉 Nome indo pra fila!
         message: parsedMessage,
       });
-
     } catch (error) {
       console.error('[Webhook Process Error]:', error);
     }

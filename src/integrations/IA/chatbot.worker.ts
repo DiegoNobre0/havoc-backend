@@ -296,6 +296,12 @@ O cliente clicou no botão para fechar o pedido.
 Carrinho atual: ${carrinhoTexto}.
 ⚠️ INSTRUÇÃO DO SISTEMA: Inicie a ETAPA 6 agora. Execute APENAS o PASSO 1 do Checkout (pergunte sobre Retirada ou Entrega e pare).`;
       }
+      // 5. Botão de Confirmar Resumo (Sim, gerar pedido)
+      else if (textoFinal?.includes('[GERAR_CHECKOUT_AGORA]')) {
+        textoParaHistorico = 'Sim, os dados estão corretos. Pode gerar o pedido!';
+        textoFinal = `[GERAR_CHECKOUT_AGORA] O cliente confirmou o resumo do pedido.
+⚠️ INSTRUÇÃO DO SISTEMA: Chame a ferramenta 'gerar_resumo_e_checkout' IMEDIATAMENTE usando os dados coletados.`;
+      }
 
       // ── Histórico + IA ───────────────────────────────────────
       const history = await getHistory(sKey);
@@ -376,17 +382,18 @@ Carrinho atual: ${carrinhoTexto}.
         const pixMatch = aiResponse.content.match(/\[PIX:(.*?)\]/i);
         const pixCode = pixMatch ? pixMatch[1].trim() : null;
 
-        console.log(`[DEBUG TAG] Produto Sugerido Extraído: "${produtoSugerido}"`);
+        const hasFinalConfirmButtons = aiResponse.content.includes('[BOTOES_CONFIRMACAO_FINAL]');
 
-        // 👉 LIMPANDO TUDO DA TELA DO CLIENTE
         let finalContent = aiResponse.content
           .replace(imgRegex, '')
           .replace(confirmTagParaLimpar, '')
           .replace(toolTagRegex, '')
-          .replace(/\[SUGESTAO:(.*?)\]/gi, '') // Limpa o normal
-          .replace(/\[SUGGESTAO:(.*?)\]/gi, '') // Limpa o erro de ortografia da IA
-          .replace(/;/g, '') // Remove possíveis pontos e vírgulas perdidos pela IA
+          .replace(/\[SUGESTAO:(.*?)\]/gi, '')
+          .replace(/\[SUGGESTAO:(.*?)\]/gi, '')
+          .replace(/;/g, '')
           .replace(/\[PIX:(.*?)\]/gi, '')
+          .replace(/\[BOTOES_CONFIRMACAO_FINAL\]/gi, '') // 👉 LIMPA A NOVA TAG
+          .replace(/\[BOTOES_UPSELL\]/g, '')
           .trim();
 
         // 3. Agora sim, isso só será True se a IA gerou a tag ou fez a pergunta
@@ -441,6 +448,12 @@ Carrinho atual: ${carrinhoTexto}.
               { id: `CONFIRM_CHECKOUT_${Date.now()}`, title: '🛒 Finalizar pedido' },
             ],
           );
+        } else if (hasFinalConfirmButtons) {
+          // 👉 NOVO CENÁRIO: Confirmação do Resumo do Pedido (Apenas texto com botões)
+          await whatsapp.sendInteractiveTextMessage(sKey, finalContent, [
+            { id: `CONFIRM_FINAL_YES`, title: '✅ Sim, gerar pedido' },
+            { id: `CONFIRM_FINAL_NO`, title: '✏️ Alterar pedido' },
+          ]);
         } else if (hasUpsellButtons) {
           // Cenário 2: Upsell BLINDADO (Se a frase estiver no texto, os botões aparecem)
 
