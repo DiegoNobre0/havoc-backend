@@ -1,28 +1,13 @@
-import { PrismaClient, OrderStatus } from '@prisma/client';
-import { hash } from 'bcryptjs';
-
-
+import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-function getRandomDate(daysBack: number) {
-  const date = new Date();
-  date.setDate(date.getDate() - Math.floor(Math.random() * daysBack));
-  date.setHours(Math.floor(Math.random() * 24), Math.floor(Math.random() * 60));
-  return date;
-}
-
-// Lista de nomes e telefones falsos para deixar o Seed mais realista
-const fakeNames = ['João Silva', 'Maria Oliveira', 'Carlos Santos', 'Ana Costa', 'Pedro Souza', 'Lucas Almeida', 'Juliana Lima', 'Fernanda Alves'];
-function getRandomClient() {
-  const name = fakeNames[Math.floor(Math.random() * fakeNames.length)];
-  const phone = `55719${Math.floor(10000000 + Math.random() * 90000000)}`; // Gera um número aleatório (Ex: 5571988887777)
-  return { name, phone };
-}
-
 async function main() {
-  console.log('🌱 Iniciando o Seed Premium da Havoc Suplementos...');
+  console.log('🌱 Iniciando o Seed Premium - Catálogo Definitivo (49 Produtos)...');
 
+  // ==========================================
+  // 1. LIMPEZA TOTAL DO BANCO
+  // ==========================================
   console.log('🧹 Limpando dados antigos...');
   await prisma.orderStatusHistory.deleteMany();
   await prisma.payment.deleteMany();
@@ -33,419 +18,762 @@ async function main() {
   await prisma.product.deleteMany();
   await prisma.category.deleteMany();
 
-  console.log('👤 Garantindo usuário de teste...');
+  // ==========================================
+  // 2. CRIANDO AS CATEGORIAS E TAGS (N:N)
+  // ==========================================
+  console.log('📦 Construindo a árvore de categorias e filtros...');
 
-const hashedPassword = await hash('123456', 12);
-
-  const testUser = await prisma.user.upsert({
-    where: { email: 'cliente@teste.com' },
-    update: {},
-    create: {
-      name: 'Operador Havoc',
-      email: 'cliente@teste.com',
-      password: hashedPassword,
-      role: 'ADMIN', // ou OPERADOR, dependendo dos seus Enums
-      isActive: true
-    }
+  // Categorias Principais
+  const catPreTreino = await prisma.category.create({
+    data: { name: 'Pré-Treino', slug: 'pre-treino' },
+  });
+  const catCreatina = await prisma.category.create({
+    data: { name: 'Creatina', slug: 'creatina' },
+  });
+  const catWhey = await prisma.category.create({
+    data: { name: 'Whey Protein', slug: 'whey-protein' },
+  });
+  const catBeef = await prisma.category.create({
+    data: { name: 'Proteína da Carne (Beef)', slug: 'proteina-carne' },
+  });
+  const catOvo = await prisma.category.create({
+    data: { name: 'Albumina (Ovo)', slug: 'albumina-ovo' },
+  });
+  const catTermo = await prisma.category.create({
+    data: { name: 'Termogênicos', slug: 'termogenicos' },
+  });
+  const catEmagrecimento = await prisma.category.create({
+    data: { name: 'Emagrecimento & Definição', slug: 'emagrecimento-definicao' },
+  });
+  const catMaisVendidos = await prisma.category.create({
+    data: { name: 'Mais Vendidos', slug: 'mais-vendidos' },
   });
 
-  console.log('📦 Criando categorias...');
-  const cat = {
-    prot: await prisma.category.create({ data: { name: 'Proteínas', slug: 'proteinas' } }),
-    ener: await prisma.category.create({ data: { name: 'Energia & Foco', slug: 'energia-foco' } }),
-    amino: await prisma.category.create({ data: { name: 'Aminoácidos', slug: 'aminoacidos' } }),
-    emag: await prisma.category.create({ data: { name: 'Emagrecimento', slug: 'emagrecimento' } }),
-    saude: await prisma.category.create({ data: { name: 'Saúde & Vitaminas', slug: 'saude' } }),
-    massa: await prisma.category.create({ data: { name: 'Ganho de Massa', slug: 'ganho-de-massa' } }),
-    vendas: await prisma.category.create({ data: { name: 'Mais Vendidos', slug: 'mais-vendidos' } }),
-  };
+  // Sub-categorias / Tags de Filtro
+  const tagConcentrado = await prisma.category.create({
+    data: { name: 'Whey Concentrado', slug: 'whey-concentrado' },
+  });
+  const tagIsolado = await prisma.category.create({
+    data: { name: 'Whey Isolado', slug: 'whey-isolado' },
+  });
+  const tagHidrolisado = await prisma.category.create({
+    data: { name: 'Whey Hidrolisado', slug: 'whey-hidrolisado' },
+  });
+  const tagZeroLactose = await prisma.category.create({
+    data: { name: 'Zero Lactose', slug: 'zero-lactose' },
+  });
+  const tagSemGluten = await prisma.category.create({
+    data: { name: 'Sem Glúten', slug: 'sem-gluten' },
+  });
+  const tagSemCafeina = await prisma.category.create({
+    data: { name: 'Sem Cafeína (Stim Free)', slug: 'sem-cafeina' },
+  });
 
-  console.log('💊 Criando catálogo completo de produtos...');
-  const products = await Promise.all([
-    // ==========================================
-    // PRODUTOS ORIGINAIS HAVOC (Índices 0 a 7)
-    // ==========================================
-    prisma.product.create({ 
-      data: { 
-        name: 'Havoc Elite - Whey Isolado 900g Chocolate Belga', slug: 'havoc-iso-choc', price: 229.90, stock: 50, 
-        description: 'A linha Elite traz a pureza do soro do leite isolado com tecnologia de microfiltragem. 27g de proteína por dose e absorção ultra-rápida.',
-        imageUrl: 'https://images.unsplash.com/photo-1593095191850-2a763399765a?q=80&w=800&auto=format&fit=crop', 
-        categories: { connect: [{ id: cat.prot.id }, { id: cat.vendas.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Havoc Elite - Whey Isolado 900g Cookies', slug: 'havoc-iso-cookies', price: 229.90, stock: 40, 
-        description: 'Sabor inigualável com pedaços reais de cookies. A proteína ideal para quem não abre mão do prazer e da dieta.',
-        imageUrl: 'https://images.unsplash.com/photo-1546483875-ad9014c88eba?q=80&w=800&auto=format&fit=crop', 
-        categories: { connect: [{ id: cat.prot.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Havoc Core - Whey Concentrado 1kg Baunilha', slug: 'havoc-conc-baunilha', price: 149.00, stock: 120, 
-        description: 'Whey concentrado de alto valor biológico. Rico em BCAAs e perfeito para o aporte proteico diário em dietas de hipertrofia.',
-        imageUrl: 'https://images.unsplash.com/photo-1579722820308-d74e5719d38e?q=80&w=800&auto=format&fit=crop', 
-        categories: { connect: [{ id: cat.prot.id }, { id: cat.vendas.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Havoc Nuclear - Pré-Treino 300g Lemonade', slug: 'havoc-nuclear-lemon', price: 169.90, stock: 60, 
-        description: 'Sinta o poder da explosão. Fórmula com Beta-Alanina e Arginina para o máximo pump e foco cognitivo durante o treino.',
-        imageUrl: 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?q=80&w=800&auto=format&fit=crop', 
-        categories: { connect: [{ id: cat.ener.id }, { id: cat.vendas.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Havoc Pure - Creatina Monohidratada 300g', slug: 'havoc-creatina-300', price: 119.90, stock: 300, 
-        description: '100% pura e micronizada. Aumente sua força bruta e resistência muscular com a creatina de grau farmacêutico da Havoc.',
-        imageUrl: 'https://images.unsplash.com/photo-1594498653385-d5172c532c00?q=80&w=800&auto=format&fit=crop', 
-        categories: { connect: [{ id: cat.amino.id }, { id: cat.massa.id }, { id: cat.vendas.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Havoc Recovery - BCAA 2:1:1 120 Caps', slug: 'havoc-bcaa-caps', price: 69.90, stock: 150, 
-        description: 'Recuperação muscular acelerada. Proteja seus músculos contra o catabolismo com o balanço perfeito de Leucina, Isoleucina e Valina.',
-        imageUrl: 'https://images.unsplash.com/photo-1584017945391-5fe1f5c3d47a?q=80&w=800&auto=format&fit=crop', 
-        categories: { connect: [{ id: cat.amino.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Havoc Burn - Hellfire 60 Caps', slug: 'havoc-hellfire', price: 135.00, stock: 45, 
-        description: 'O termogênico definitivo. Ataque a gordura localizada e aumente sua taxa metabólica basal com a tecnologia Hellfire.',
-        imageUrl: 'https://images.unsplash.com/photo-1550572017-ed20bb0f4077?q=80&w=800&auto=format&fit=crop', 
-        categories: { connect: [{ id: cat.emag.id }, { id: cat.ener.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Havoc Daily - Multivitamínico A-Z', slug: 'havoc-multivit', price: 75.00, stock: 200, 
-        description: 'Saúde blindada. Suporte completo para sua imunidade e funções vitais com um blend de vitaminas e minerais de alta absorção.',
-        imageUrl: 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?q=80&w=800&auto=format&fit=crop', 
-        categories: { connect: [{ id: cat.saude.id }] } 
-      } 
-    }),
+  // ==========================================
+  // 3. CADASTRANDO OS 49 PRODUTOS COM IMAGENS DO CLOUDFLARE
+  // ==========================================
+  console.log('💊 Cadastrando catálogo com múltiplas tags...');
 
-    // ==========================================
-    // LOTE 1 (Índices 8 a 17)
-    // ==========================================
-    prisma.product.create({ 
-      data: { 
-        name: 'Integralmedica Whey 100% Pure 900g Cookies & Cream', slug: 'integralmedica-whey-100-cookies', price: 139.90, stock: 45, 
-        description: 'Proteína concentrada de alto valor biológico para ganho de massa magra. Sabor irresistível de Cookies & Cream para facilitar sua dieta diária.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/c0a5f8d4-3d9c-4d8e-8b5a-1c9e8d7f6e5d.jpg', categories: { connect: [{ id: cat.prot.id }, { id: cat.vendas.id }] } 
-      } 
+  await Promise.all([
+    // ---------------------------------------------------------
+    // PRÉ-TREINOS
+    // ---------------------------------------------------------
+    prisma.product.create({
+      data: {
+        name: 'Max Titanium Hórus 300g - Amora',
+        slug: 'max-titanium-horus-300g-amora',
+        price: 109.9,
+        stock: 100,
+        description:
+          'Pré-treino oficial dos campeões. Auxilia no aumento do estado de alerta com Beta-Alanina e Cafeína.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/13ccbff5-80d4-4f19-a6d3-55cf76189432.jpg',
+        categories: { connect: [{ id: catPreTreino.id }] },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Darkness Carnibol Beef Protein 900g Salted Caramel', slug: 'darkness-carnibol-caramel', price: 199.90, stock: 30, 
-        description: 'Proteína isolada da carne de rápida absorção, ideal para intolerantes à lactose. Ganho extremo de força e hipertrofia com sabor premium.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/99be3311-d1d8-4322-846a-e1853ca667f6.jpg', categories: { connect: [{ id: cat.prot.id }] } 
-      } 
+    prisma.product.create({
+      data: {
+        name: 'FTW Diabo Verde 300g - Bala de Framboesa',
+        slug: 'ftw-diabo-verde-300g-framboesa',
+        price: 119.9,
+        stock: 100,
+        description:
+          'Fórmula ultra concentrada. Explosão de energia extrema para os treinos mais intensos.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/9b918d02-8f3b-4a06-b991-3a2e396f26a8.jpg',
+        categories: { connect: [{ id: catPreTreino.id }, { id: catMaisVendidos.id }] },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Uêvo Proteína Explosão de Chocolate 420g', slug: 'uevo-proteina-chocolate', price: 79.90, stock: 65, 
-        description: 'A evolução da proteína com zero lactose e sabor irresistível de chocolate. Excelente perfil de aminoácidos para recuperação e síntese muscular.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/b70ff91b-ca37-4a16-9a4d-45f540a532e3.jpg', categories: { connect: [{ id: cat.prot.id }] } 
-      } 
+    prisma.product.create({
+      data: {
+        name: 'Under Labz Rampage 300g - Melancia com Limão',
+        slug: 'under-labz-rampage-300g-melancia-limao',
+        price: 169.9,
+        stock: 100,
+        description:
+          'Matriz de energia agressiva para aumentar o pump, foco cognitivo e resistência muscular.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/1e7cadfa-198d-4078-9151-ef5786e4257c.jpg',
+        categories: { connect: [{ id: catPreTreino.id }] },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Integralmedica Creamass Hipercalórico Morango', slug: 'integralmedica-creamass-morango', price: 89.90, stock: 60, 
-        description: 'Combinação potente de carboidratos e proteínas para quem busca ganho de peso e volume muscular rápido. Energia de sobra para treinos intensos.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havocF/2ef2c29c-c691-43e0-9cb5-3dcdff4d5eb5.jpg', categories: { connect: [{ id: cat.massa.id }] } 
-      } 
+    prisma.product.create({
+      data: {
+        name: 'Under Labz Fckng Booster 300g - Apple Beat',
+        slug: 'under-labz-fckng-booster-300g-apple-beat',
+        price: 179.9,
+        stock: 100,
+        description:
+          'Booster extremo para atletas de alta performance. Energia contínua e foco inabalável.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/b52fa268-14fb-4603-a648-968a874b11fa.jpg',
+        categories: { connect: [{ id: catPreTreino.id }] },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Black Skull Creatina Micronizada 300g', slug: 'blackskull-creatina-mic-300', price: 109.90, stock: 120, 
-        description: 'Creatina 100% pura e micronizada para máxima absorção. Aumente sua força explosiva, resistência e volume muscular em cada treino.',
-        imageUrl: 'URL_DA_IMAGEM_AQUI', categories: { connect: [{ id: cat.amino.id }, { id: cat.massa.id }, { id: cat.vendas.id }] } 
-      } 
+    prisma.product.create({
+      data: {
+        name: 'Body Action Nuclear Rush 100g - Limão',
+        slug: 'body-action-nuclear-rush-100g-limao',
+        price: 79.9,
+        stock: 100,
+        description:
+          'Pequeno no tamanho, brutal na fórmula! Boro, Citrulina, Taurina e impressionantes 400mg de Cafeína.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/fdc41011-fb72-4f41-b3b2-92ac9ddc88d7.jpg',
+        categories: { connect: [{ id: catPreTreino.id }] },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Black Skull Creatine Hardcore 150g Sem Sabor', slug: 'blackskull-creatine-hardcore-150', price: 69.90, stock: 80, 
-        description: 'A creatina monohidratada essencial para seu dia a dia. Melhora o desempenho físico em exercícios de alta intensidade e curta duração.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/18c85def-c4f7-449e-99f0-4714148b42ad.jpg', categories: { connect: [{ id: cat.amino.id }] } 
-      } 
+    prisma.product.create({
+      data: {
+        name: 'Health Cyde Psycho Bomb 300g - Red Fruits',
+        slug: 'health-cyde-psycho-bomb-300g-red-fruits',
+        price: 149.9,
+        stock: 100,
+        description: 'Fórmula explosiva projetada para maximizar energia, foco e vasodilatação.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/0cddf492-9421-4989-8e4d-094cbcdccc9c.jpg',
+        categories: { connect: [{ id: catPreTreino.id }] },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Under Labz FCKNG Booster Pré-Treino 300g Maçã Verde', slug: 'underlabz-fckng-booster-maca', price: 159.90, stock: 40, 
-        description: 'Pré-treino extremo para energia insana e foco absoluto. Fórmula ultra concentrada que vai elevar sua performance ao nível máximo.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/a4d5909d-60c4-47cd-a47d-64308e48fd95.jpg', categories: { connect: [{ id: cat.ener.id }] } 
-      } 
+    prisma.product.create({
+      data: {
+        name: 'Under Labz Rocket Energy 450g - Original',
+        slug: 'under-labz-rocket-energy-450g',
+        price: 199.9,
+        stock: 100,
+        description:
+          'Energia de foguete para seus treinos. Enriquecido com Coenzima Q10, Citarg e Pump Matrix.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/9a5016d5-ea3d-4bc5-b14d-22e6753cc6ac.jpg',
+        categories: { connect: [{ id: catPreTreino.id }] },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Under Labz Warzone Pré-Treino Stim-Free 360g Passion & Fury', slug: 'underlabz-warzone-stim-free-passion', price: 169.90, stock: 35, 
-        description: 'O pump máximo sem estimulantes (Zero Cafeína). Focado na vasodilatação extrema e entrega de nutrientes, perfeito para treinos noturnos.',
-        imageUrl: 'URL_DA_IMAGEM_AQUI', categories: { connect: [{ id: cat.ener.id }] } 
-      } 
+    prisma.product.create({
+      data: {
+        name: 'Darkness Évora PW 300g - Limão',
+        slug: 'darkness-evora-pw-300g-limao',
+        price: 139.9,
+        stock: 100,
+        description:
+          'Energia insana para treinos hardcore. Fornece força máxima e retarda a fadiga muscular.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/f24ad755-e00a-4d29-9ecf-983da36bc23a.jpg',
+        categories: { connect: [{ id: catPreTreino.id }] },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Under Labz Warzone Pré-Treino Nitric Oxide 300g Green Bomb', slug: 'underlabz-warzone-nitric-greenbomb', price: 179.90, stock: 50, 
-        description: 'Precursor de óxido nítrico para um pump absurdo e vascularização evidente. Energia explosiva e resistência incomparável para dominar o treino.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/15d2f47b-69ad-431f-a7be-a1c16428285c.jpg', categories: { connect: [{ id: cat.ener.id }] } 
-      } 
+    prisma.product.create({
+      data: {
+        name: 'Under Labz Warzone Nitric Oxide Precursor 300g - Green Bomb',
+        slug: 'under-labz-warzone-nitric-oxide-300g-green-bomb',
+        price: 189.9,
+        stock: 100,
+        description: 'Focado em Pump Matrix com altíssima dosagem de precursores de óxido nítrico.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/69afc863-6f89-41b3-a511-b919cbd46614.jpg',
+        categories: { connect: [{ id: catPreTreino.id }] },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'DiuraX Potente Diurético 20 Comprimidos', slug: 'diurax-diuretico-20-comp', price: 59.90, stock: 150, 
-        description: 'Elimine a retenção de líquidos e alcance a máxima definição muscular. Fórmula avançada com matéria-prima importada para secar com saúde.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/0786bc7b-42c2-4300-a4da-818981547df5.jpg', categories: { connect: [{ id: cat.emag.id }] } 
-      } 
-    }),
-
-    // ==========================================
-    // LOTE 2 (Índices 18 a 27)
-    // ==========================================
-    prisma.product.create({ 
-      data: { 
-        name: 'Black Skull Whey 100% HD 900g Baunilha', slug: 'blackskull-whey-hd-baunilha', price: 129.90, stock: 55, 
-        description: 'Matriz 3W (Concentrada, Isolada e Hidrolisada) em um só produto. Auxilia na construção e definição muscular com um autêntico sabor de baunilha.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/6f23ccd8-1347-482d-b98b-8bb2d279fd6c.jpg', categories: { connect: [{ id: cat.prot.id }, { id: cat.vendas.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Dux Nutrition Whey Protein Isolado 900g Sabor Neutro', slug: 'dux-whey-isolado-neutro', price: 249.90, stock: 30, 
-        description: 'Pureza máxima com 100% de proteína isolada duplamente filtrada. Absorção ultra-rápida e zero adições, ideal para receitas ou consumo puro.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/2706a832-5c02-49e0-887b-fa4b5474f6bd.jpg', categories: { connect: [{ id: cat.prot.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Body Action 100% Whey Prime 900g Baunilha', slug: 'bodyaction-whey-prime-baunilha', price: 99.90, stock: 80, 
-        description: 'Excelente custo-benefício para sua dieta. Enriquecido com Glutamina e BCAA (Crea-ATP) para otimizar sua recuperação muscular diária.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/b70ff91b-ca37-4a16-9a4d-45f540a532e3.jpg', categories: { connect: [{ id: cat.prot.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Body Action Nuclear Rush Pré-Treino 100g Uva', slug: 'bodyaction-nuclear-rush-uva', price: 69.90, stock: 100, 
-        description: 'Explosão de energia com 400mg de cafeína, boro e citrulina. O empurrão concentrado que faltava para você bater seus recordes no treino.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/0631b4a1-4a3f-4cb2-b0a0-fb2f5c10ad19.jpg', categories: { connect: [{ id: cat.ener.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: 'FTW Diabo Verde Pré-Treino 300g Frutas Vermelhas', slug: 'ftw-diabo-verde-frutas-vermelhas', price: 119.90, stock: 65, 
-        description: 'Nova fórmula insana com Beta-Alanina, Taurina e Cafeína. O verdadeiro terror da fadiga muscular para treinos de altíssima intensidade.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/8f5db738-ca04-4dee-abe3-6a9b1369d191.jpg', categories: { connect: [{ id: cat.ener.id }, { id: cat.vendas.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Health Cyde Psycho Bomb Pré-Treino 300g Green Apple', slug: 'healthcyde-psycho-bomb-maca', price: 149.90, stock: 40, 
-        description: 'Eleve seu treinamento ao extremo com energia e foco inigualáveis. Sabor refrescante de maçã verde e formulação com matéria-prima importada.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/7f3c31de-1a8b-4082-8e00-99a682a196dd.jpg', categories: { connect: [{ id: cat.ener.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Lizard Yohimbine 5mg 90 Tabletes', slug: 'lizard-yohimbine-5mg', price: 89.90, stock: 50, 
-        description: 'Potente queimador de gordura. A Ioimbina age diretamente nas reservas de gordura localizada mais difíceis, acelerando a definição muscular.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/2b24106a-b72a-402a-a814-9007da02ccb0.jpg', categories: { connect: [{ id: cat.emag.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: "Nutrition'all Magnésio Dimalato 60 Cápsulas", slug: 'nutritionall-magnesio-dimalato', price: 54.90, stock: 120, 
-        description: 'Suporte vital para a saúde cardiovascular e redução da fadiga. Melhore sua energia celular e bem-estar geral com magnésio de alta absorção.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/2bc59f07-2594-4258-96a0-58b91152aa81.jpg', categories: { connect: [{ id: cat.saude.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Body Action Magnésio & Inositol 210g Frutas Vermelhas', slug: 'bodyaction-magnesio-inositol-frutas', price: 79.90, stock: 45, 
-        description: 'O combo perfeito para o relaxamento. Contém Taurina e Melatonina para garantir um sono profundo e restaurador após dias de treinos pesados.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/4801b926-14a5-41a7-8297-67c8b9968423.jpg', categories: { connect: [{ id: cat.saude.id }] } 
-      } 
-    }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Body Action Complexo B de Vitaminas 60 Cápsulas Softgel', slug: 'bodyaction-complexo-b', price: 39.90, stock: 90, 
-        description: 'Todas as vitaminas do complexo B (B1 a B12) em cápsulas softgel com TCM. Essencial para otimizar o metabolismo energético e a imunidade.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/9375f8be-5218-41ac-b002-186072314c4d.jpg', categories: { connect: [{ id: cat.saude.id }] } 
-      } 
+    prisma.product.create({
+      data: {
+        name: 'FTW Diabo Verde Pre-Workout (Nova Fórmula) 300g - Frutas Vermelhas',
+        slug: 'ftw-diabo-verde-nova-formula-300g',
+        price: 129.9,
+        stock: 100,
+        description:
+          'A nova fórmula do clássico Diabo Verde, agora ainda mais potente e com absorção otimizada.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/dafe10cb-1743-40a7-bb96-3a28efb0c653.jpg',
+        categories: { connect: [{ id: catPreTreino.id }] },
+      },
     }),
 
-    // ==========================================
-    // LOTE 3 (Índices 28 a 35)
-    // ==========================================
-    prisma.product.create({ 
-      data: { 
-        name: 'Black Skull Whey 100% HD 900g Morango', slug: 'blackskull-whey-hd-morango', price: 129.90, stock: 50, 
-        description: 'A clássica matriz 3W Caveira Preta agora no sabor morango. Hipertrofia e recuperação com um blend perfeito de proteínas concentrada, isolada e hidrolisada.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/99be3311-d1d8-4322-846a-e1853ca667f6.jpg', categories: { connect: [{ id: cat.prot.id }] } 
-      } 
+    // ---------------------------------------------------------
+    // CREATINAS
+    // ---------------------------------------------------------
+    prisma.product.create({
+      data: {
+        name: 'Black Skull Creatine Hardcore 150g - Sem Sabor',
+        slug: 'black-skull-creatine-hardcore-150g',
+        price: 69.9,
+        stock: 100,
+        description: 'Creatina monohidratada pura. Aumento comprovado de força e hipertrofia.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/0d02d975-1933-4098-b734-ea2caae58d1b.jpg',
+        categories: { connect: [{ id: catCreatina.id }, { id: tagSemGluten.id }] },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Nutrata W100 Whey Concentrado 900g Chocolate com Coco', slug: 'nutrata-w100-chocolate-coco', price: 119.90, stock: 60, 
-        description: 'Sabor premium incrível de chocolate com coco. Whey 100% concentrado com alto índice de pureza e excelente digestibilidade para o seu dia a dia.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/5e5109b5-7686-41c5-9af5-716f8eab2eaa.jpg', categories: { connect: [{ id: cat.prot.id }, { id: cat.vendas.id }] } 
-      } 
+    prisma.product.create({
+      data: {
+        name: 'Max Titanium Creatine 500g - Sem Sabor',
+        slug: 'max-titanium-creatina-500g',
+        price: 149.9,
+        stock: 150,
+        description: 'Pote econômico de meio quilo. 100% pura e com 0% sódio.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/3ab3d8b5-52fb-4f6d-ba1d-beea2a36f884.jpg',
+        categories: {
+          connect: [{ id: catCreatina.id }, { id: catMaisVendidos.id }, { id: tagSemGluten.id }],
+        },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Body Action 100% Whey Prime 900g Morango', slug: 'bodyaction-whey-prime-morango', price: 99.90, stock: 75, 
-        description: 'Fórmula Low Carb rica em Glutamina e BCAA. O Whey Prime é seu aliado diário para manutenção da massa magra com um delicioso sabor de morango.',
-        imageUrl: 'URL_DA_IMAGEM_AQUI', categories: { connect: [{ id: cat.prot.id }] } 
-      } 
+    prisma.product.create({
+      data: {
+        name: 'Under Labz Creatine 100 Doses 300g - Sem Sabor',
+        slug: 'under-labz-creatine-100-doses-300g',
+        price: 119.9,
+        stock: 100,
+        description: '#BornToDisrupt. Creatina de altíssima pureza com rendimento para 100 doses.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/6edbd51d-56e8-4b25-8cbc-d2da3388c703.jpg',
+        categories: { connect: [{ id: catCreatina.id }, { id: tagSemGluten.id }] },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Body Action Isolate Prime Whey 900g Baunilha Natural', slug: 'bodyaction-isolate-prime-baunilha', price: 169.90, stock: 35, 
-        description: 'Proteína Isolada e Hidrolisada, Zero Lactose. Enriquecida com CoQ10 e vitaminas, entrega a forma mais pura de nutrição muscular com rápida absorção.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/8b698c1f-ee3f-4a46-8ebe-5aa7ef0d76ea.jpg', categories: { connect: [{ id: cat.prot.id }] } 
-      } 
+    prisma.product.create({
+      data: {
+        name: 'Integralmedica Creatina Hardcore 300g - Sem Sabor',
+        slug: 'integralmedica-creatina-hardcore-300g',
+        price: 99.9,
+        stock: 200,
+        description:
+          'O clássico indispensável. Recarrega os estoques de ATP para mais resistência.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/12c6f423-6b91-4bf9-99b6-93e775e15c9d.jpg',
+        categories: {
+          connect: [{ id: catCreatina.id }, { id: catMaisVendidos.id }, { id: tagSemGluten.id }],
+        },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Vitafor Isofort WPI 900g Frutas Vermelhas', slug: 'vitafor-isofort-frutas-vermelhas', price: 229.90, stock: 25, 
-        description: 'Referência em qualidade médica e nutricional. Whey Protein Isolate (WPI) Premium com 92% de proteína por dose, auxiliando na formação de músculos e ossos.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/8d91b7aa-66a2-4573-b1b1-d65ca4a5aa97.jpg', categories: { connect: [{ id: cat.prot.id }, { id: cat.vendas.id }] } 
-      } 
+    prisma.product.create({
+      data: {
+        name: 'Darkness Creatine Pure Powder 300g - Sem Sabor',
+        slug: 'darkness-creatine-pure-powder-300g',
+        price: 129.9,
+        stock: 100,
+        description: 'Creatina premium monohidratada. Zero aditivos, zero glúten e zero açúcar.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/d554c445-db4b-4072-ba0a-5eba24e8b207.jpg',
+        categories: { connect: [{ id: catCreatina.id }, { id: tagSemGluten.id }] },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Nutrata Iso Whey 900g Creme de Baunilha', slug: 'nutrata-isowhey-creme-baunilha', price: 199.90, stock: 40, 
-        description: 'Extraído por CFM (Cross-Flow Microfiltration), garantindo 100% de pureza e integridade das proteínas. Zero gorduras e carboidratos com sabor suave de baunilha.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/b70ff91b-ca37-4a16-9a4d-45f540a532e3.jpg', categories: { connect: [{ id: cat.prot.id }] } 
-      } 
+    prisma.product.create({
+      data: {
+        name: 'Max Titanium Creatine 300g - Sem Sabor',
+        slug: 'max-titanium-creatina-300g',
+        price: 99.9,
+        stock: 120,
+        description: 'Pura e eficiente, a versão de 300g da marca líder do Brasil.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/78c11a68-f7f4-4118-b188-cdca0fa7d0ff.jpg',
+        categories: { connect: [{ id: catCreatina.id }, { id: tagSemGluten.id }] },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Body Action Nuclear Rush Pré-Treino 100g Abacaxi', slug: 'bodyaction-nuclear-rush-abacaxi', price: 69.90, stock: 85, 
-        description: 'Sabor refrescante de abacaxi com a mesma pegada nuclear! 400mg de cafeína, beta-alanina e taurina para treinos de altíssima performance.',
-        imageUrl: 'URL_DA_IMAGEM_AQUI', categories: { connect: [{ id: cat.ener.id }] } 
-      } 
+    prisma.product.create({
+      data: {
+        name: 'Black Skull Creatine Hardcore 300g - Sem Sabor',
+        slug: 'black-skull-creatine-hardcore-300g',
+        price: 119.9,
+        stock: 100,
+        description: 'O dobro de rendimento da Caveira Preta. Aumento comprovado de força.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/316eaf79-c278-4560-b755-5ce9fb729862.jpg',
+        categories: { connect: [{ id: catCreatina.id }, { id: tagSemGluten.id }] },
+      },
     }),
-    prisma.product.create({ 
-      data: { 
-        name: 'Bull Pharma Skinni Bull Extreme Power 60 Cápsulas', slug: 'bullpharma-skinni-bull', price: 99.90, stock: 40, 
-        description: 'Termogênico insano com Yohimbine HCL. Queima calórica elevada, melhora extrema de foco e energia absurda para derreter gordura.',
-        imageUrl: 'https://pub-2aabf6ca7b174b238f24715f461a0132.r2.dev/havoc/b0f2480f-5a9d-48fd-a877-1da88bfa51c8.jpg', categories: { connect: [{ id: cat.emag.id }] } 
-      } 
-    })
+    prisma.product.create({
+      data: {
+        name: 'FTW Diabo Verde Creatina 300g - Neutro',
+        slug: 'ftw-diabo-verde-creatina-300g',
+        price: 109.9,
+        stock: 100,
+        description: 'A força do Diabo Verde agora em creatina pura monohidratada.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/0446faa6-c997-458b-8881-6dd32cdc89ee.jpg',
+        categories: { connect: [{ id: catCreatina.id }, { id: tagSemGluten.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'MK Suplementos Creatina Micronizada 300g - Sem Sabor',
+        slug: 'mk-suplementos-creatina-micronizada-300g',
+        price: 89.9,
+        stock: 100,
+        description: 'Creatina micronizada com absorção superior para máxima performance.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/86838407-cd9e-4fa6-95e8-fb6655666ed0.jpg',
+        categories: { connect: [{ id: catCreatina.id }, { id: tagSemGluten.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Vitafor Creatine monohydrate 100% Pure 300g - Sem Sabor',
+        slug: 'vitafor-creatine-pure-300g',
+        price: 139.9,
+        stock: 100,
+        description: 'Padrão ouro de pureza Vitafor. Essencial para recarga de ATP.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/89598a8a-d59b-4817-8f88-213553d504f9.jpg',
+        categories: { connect: [{ id: catCreatina.id }, { id: tagSemGluten.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'DUX Creatina 100% Pura 300g - Sem Sabor',
+        slug: 'dux-creatina-100-pura-300g',
+        price: 149.9,
+        stock: 110,
+        description: 'Creatina premium da DUX. Matéria-prima importada de eficácia comprovada.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/e001e87b-14ef-4e49-ae35-dc41d88ac9c2.jpg',
+        categories: {
+          connect: [{ id: catCreatina.id }, { id: catMaisVendidos.id }, { id: tagSemGluten.id }],
+        },
+      },
+    }),
+
+    // ---------------------------------------------------------
+    // WHEY PROTEIN & BLENDS
+    // ---------------------------------------------------------
+    prisma.product.create({
+      data: {
+        name: 'Olympus 3W Whey 900g - Leitinho',
+        slug: 'olympus-3w-whey-900g-leitinho',
+        price: 139.9,
+        stock: 120,
+        description: 'Blend inteligente de Whey Concentrado, Isolado e Hidrolisado.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/abda039d-6d93-4f20-9145-fc6b87919647.jpg',
+        categories: {
+          connect: [
+            { id: catWhey.id },
+            { id: tagConcentrado.id },
+            { id: tagIsolado.id },
+            { id: tagHidrolisado.id },
+          ],
+        },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'MR Supplements Best Gourmet 900g - Pudim',
+        slug: 'mr-supplements-best-gourmet-900g-pudim',
+        price: 145.0,
+        stock: 100,
+        description: '100% Whey Protein com sabor idêntico a sobremesa de pudim.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/40a37c9d-1294-41dd-93fd-43f4209a9f74.jpg',
+        categories: { connect: [{ id: catWhey.id }, { id: tagConcentrado.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Under Labz Protein Crush 900g - Alpine Milk Bear',
+        slug: 'under-labz-protein-crush-900g',
+        price: 159.9,
+        stock: 100,
+        description: 'Alto valor biológico com Coenzima Q10. Sabor Leite Alpino sem glúten.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/d3341346-1414-463c-a2df-bda4c70af447.jpg',
+        categories: {
+          connect: [{ id: catWhey.id }, { id: tagConcentrado.id }, { id: tagSemGluten.id }],
+        },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Max Titanium 100% Whey 900g - Morango',
+        slug: 'max-titanium-100-whey-900g-morango',
+        price: 119.9,
+        stock: 140,
+        description: 'Proteína concentrada clássica com alta quantidade de aminoácidos.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/ee8ea36b-c6d9-42eb-aae4-7d4998aa297f.jpg',
+        categories: {
+          connect: [{ id: catWhey.id }, { id: tagConcentrado.id }, { id: catMaisVendidos.id }],
+        },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Integralmedica Whey 100% Pure 900g - Chocolate',
+        slug: 'integralmedica-whey-100-pure-900g-chocolate',
+        price: 119.9,
+        stock: 150,
+        description:
+          'Whey Protein Concentrado com o clássico sabor de chocolate da Integralmedica.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/7e044993-32cd-4103-802e-4bfb88cc9e22.jpg',
+        categories: {
+          connect: [{ id: catWhey.id }, { id: tagConcentrado.id }, { id: catMaisVendidos.id }],
+        },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Under Labz 100% Whey Crush 900g - Chocobear',
+        slug: 'under-labz-100-whey-crush-900g-chocobear',
+        price: 159.9,
+        stock: 100,
+        description: 'Sabor intenso de chocolate aliado a uma matriz proteica de alta absorção.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/53935d9b-2442-41c5-a9de-89de90d8a85d.jpg',
+        categories: {
+          connect: [{ id: catWhey.id }, { id: tagConcentrado.id }, { id: tagSemGluten.id }],
+        },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Black Skull Whey 100% HD 900g - Morango',
+        slug: 'black-skull-whey-100-hd-900g-morango',
+        price: 129.9,
+        stock: 100,
+        description:
+          'Whey Protein High Definition (3W). Matriz proteica pesada para quem treina de verdade.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/581294cf-a8e2-4ee8-aff7-0095d357629c.jpg',
+        categories: {
+          connect: [
+            { id: catWhey.id },
+            { id: tagConcentrado.id },
+            { id: tagIsolado.id },
+            { id: tagHidrolisado.id },
+          ],
+        },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Vitafor Whey Protein WPC 900g - Mousse de Maracujá',
+        slug: 'vitafor-whey-protein-wpc-900g-maracuja',
+        price: 169.9,
+        stock: 100,
+        description:
+          'Whey Protein Concentrado Premium com sabor refrescante de Mousse de Maracujá.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/e99939f7-5290-4ab3-b9f7-81b2eb632bfb.jpg',
+        categories: { connect: [{ id: catWhey.id }, { id: tagConcentrado.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'DUX Whey Protein Isolado 900g - Caramelo Salgado',
+        slug: 'dux-whey-protein-isolado-900g-caramelo',
+        price: 239.9,
+        stock: 100,
+        description: 'Proteína Isolada de altíssima pureza com sabor gourmet.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/7cfe7384-0966-40f9-a00e-c69ce2b6708e.jpg',
+        categories: {
+          connect: [{ id: catWhey.id }, { id: tagIsolado.id }, { id: tagZeroLactose.id }],
+        },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Nutrata W100 Whey Concentrado 900g - Double Chocolate',
+        slug: 'nutrata-w100-whey-concentrado-900g',
+        price: 145.9,
+        stock: 100,
+        description: 'O melhor Whey Concentrado com o dobro de cacau.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/8d1537da-5de1-4062-b86b-09cdf54e57b1.jpg',
+        categories: { connect: [{ id: catWhey.id }, { id: tagConcentrado.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Bluster Nutrition 100% Power Whey 900g - Baunilha',
+        slug: 'bluster-nutrition-100-power-whey-900g',
+        price: 99.9,
+        stock: 100,
+        description: 'Custo-benefício excelente para garantir sua cota diária de proteínas.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/45be7c14-48e3-4cee-9cf1-829fda0a5a4d.jpg',
+        categories: { connect: [{ id: catWhey.id }, { id: tagConcentrado.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Body Action Isolate Prime Whey 900g - Baunilha Natural',
+        slug: 'body-action-isolate-prime-whey-900g',
+        price: 189.9,
+        stock: 100,
+        description: 'Isolado Premium com perfil de aminoácidos excelente para rápida recuperação.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/a623da8a-bd2f-4d71-99a0-1a34a5899a18.jpg',
+        categories: {
+          connect: [{ id: catWhey.id }, { id: tagIsolado.id }, { id: tagZeroLactose.id }],
+        },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'DUX Whey Protein Concentrado 900g - Caramelo Salgado',
+        slug: 'dux-whey-protein-concentrado-900g',
+        price: 169.9,
+        stock: 100,
+        description: 'Sabor inconfundível de Caramelo Salgado na versão Concentrada.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/bd9ef724-c38e-45cd-a508-3e3a77c3f295.jpg',
+        categories: { connect: [{ id: catWhey.id }, { id: tagConcentrado.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Body Action 100% Whey Prime 900g - Baunilha',
+        slug: 'body-action-100-whey-prime-900g',
+        price: 129.9,
+        stock: 100,
+        description: 'Combinação perfeita de proteínas para impulsionar seus resultados.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/e21b58aa-ab71-49ed-93d4-57725414f164.jpg',
+        categories: { connect: [{ id: catWhey.id }, { id: tagConcentrado.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Vitafor Whey Fort 3W 900g - Frutas Vermelhas',
+        slug: 'vitafor-whey-fort-3w-900g',
+        price: 179.9,
+        stock: 100,
+        description: 'Absorção em múltiplos estágios para nutrir os músculos por mais tempo.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/718daf7b-c1c2-4524-a5fc-959fa2de7333.jpg',
+        categories: {
+          connect: [
+            { id: catWhey.id },
+            { id: tagConcentrado.id },
+            { id: tagIsolado.id },
+            { id: tagHidrolisado.id },
+          ],
+        },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Vitafor Isofort WPI 900g - Neutro',
+        slug: 'vitafor-isofort-wpi-900g',
+        price: 249.9,
+        stock: 100,
+        description:
+          'Padrão clínico de Whey Protein Isolado. Alta pureza e rápida digestibilidade.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/be5f1f6c-2214-41a0-940a-8ef013181be5.jpg',
+        categories: {
+          connect: [
+            { id: catWhey.id },
+            { id: tagIsolado.id },
+            { id: tagZeroLactose.id },
+            { id: tagSemGluten.id },
+          ],
+        },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Nutrata Iso Whey Clean 900g - Natural',
+        slug: 'nutrata-iso-whey-clean-900g',
+        price: 219.9,
+        stock: 100,
+        description: 'Proteína limpa, isolada e sem adoçantes artificiais.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/e42f3362-28a9-4aef-856c-b493df44cd8c.jpg',
+        categories: {
+          connect: [
+            { id: catWhey.id },
+            { id: tagIsolado.id },
+            { id: tagZeroLactose.id },
+            { id: tagSemGluten.id },
+          ],
+        },
+      },
+    }),
+
+    // ---------------------------------------------------------
+    // PROTEÍNA DA CARNE (BEEF)
+    // ---------------------------------------------------------
+    prisma.product.create({
+      data: {
+        name: 'Darkness Carnibol 900g - Blueberry',
+        slug: 'darkness-carnibol-900g-blueberry',
+        price: 199.9,
+        stock: 100,
+        description:
+          'Proteína da carne ultra-concentrada. O Carnibol é zero lactose e rico em aminoácidos essenciais.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/bb4e974d-b985-4421-b4e2-b97ee5033700.jpg',
+        categories: { connect: [{ id: catBeef.id }, { id: tagZeroLactose.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Under Labz Beef Protein Crush 900g - Morango & Kiwi',
+        slug: 'under-labz-beef-protein-crush-900g',
+        price: 209.9,
+        stock: 100,
+        description: 'Construção muscular com a proteína isolada da carne e um sabor refrescante.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/d96bb4df-765e-4959-b442-a28fceff31ac.jpg',
+        categories: { connect: [{ id: catBeef.id }, { id: tagZeroLactose.id }] },
+      },
+    }),
+
+    // ---------------------------------------------------------
+    // ALBUMINA (OVO)
+    // ---------------------------------------------------------
+    prisma.product.create({
+      data: {
+        name: 'Uêvo Uêvolução da Proteína 420g - Explosão de Chocolate',
+        slug: 'uevo-uevolucao-proteina-420g',
+        price: 69.9,
+        stock: 100,
+        description:
+          'A revolução da clara do ovo. Albumina premium de chocolate para nutrição prolongada.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/6755d15b-bfa9-41b2-b87e-33528c2997c6.jpg',
+        categories: {
+          connect: [{ id: catOvo.id }, { id: tagZeroLactose.id }, { id: tagSemGluten.id }],
+        },
+      },
+    }),
+
+    // ---------------------------------------------------------
+    // TERMOGÊNICOS, EMAGRECIMENTO & ENERGIA
+    // ---------------------------------------------------------
+    prisma.product.create({
+      data: {
+        name: 'Health Cyde Trinka Abdômen Extreme Thermogenic 60 Caps',
+        slug: 'health-cyde-trinka-abdomen-60-caps',
+        price: 125.9,
+        stock: 100,
+        description: 'O dragão acordou! Termogênico extremo para derreter a gordura localizada.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/1d09780c-78ce-4225-a10b-5aacea800489.jpg',
+        categories: { connect: [{ id: catTermo.id }, { id: catEmagrecimento.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Cafeína Anidra 200mg 60 Caps',
+        slug: 'cafeina-anidra-200mg-60-caps',
+        price: 49.9,
+        stock: 150,
+        description: 'Energia pura e rápida absorção. 200mg por cápsula para foco e desempenho.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/3feeabf1-2685-4310-aa7b-3c880ac632ac.jpg',
+        categories: { connect: [{ id: catTermo.id }, { id: catEmagrecimento.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Body Action L-Carnitina 2000 480ml - Abacaxi com Hortelã',
+        slug: 'body-action-l-carnitina-480ml',
+        price: 89.9,
+        stock: 100,
+        description:
+          'Transporta a gordura para ser queimada como energia. Enriquecida com Vitamina B5.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/6c452769-e142-4172-a501-63b39d41847a.jpg',
+        categories: { connect: [{ id: catEmagrecimento.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Bull Pharma Skinni Bull Extreme Power 60 Caps',
+        slug: 'bull-pharma-skinni-bull-60-caps',
+        price: 139.9,
+        stock: 100,
+        description: 'Com Yohimbine HCL. Elevada queima de calorias, foco e humor aprimorados.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/6d1e0c68-3365-4a06-ba00-ed755e5c9ab9.jpg',
+        categories: { connect: [{ id: catTermo.id }, { id: catEmagrecimento.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Under Labz Dimethylex Thermogenic Stim Free (Azul) 60 Caps',
+        slug: 'under-labz-dimethylex-stim-free-60-caps',
+        price: 159.9,
+        stock: 100,
+        description:
+          'Termogênico sem cafeína. Perfeito para queimar gordura sem afetar o seu sono.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/882b237f-4db8-464d-abad-03226f6ec664.jpg',
+        categories: {
+          connect: [{ id: catTermo.id }, { id: catEmagrecimento.id }, { id: tagSemCafeina.id }],
+        },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Under Labz Dimethylex Thermogenic Fat Burner (Vermelho) 60 Caps',
+        slug: 'under-labz-dimethylex-fat-burner-60-caps',
+        price: 159.9,
+        stock: 100,
+        description: 'Queimador de gordura brutal com fórmula disruptiva para resultados extremos.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/4905cc59-e5dc-4873-a3fa-51a5f11e79a6.jpg',
+        categories: { connect: [{ id: catTermo.id }, { id: catEmagrecimento.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Laboratory Lizard Yohimbine 5mg 90 Tablets',
+        slug: 'lizard-yohimbine-5mg-90-tablets',
+        price: 99.9,
+        stock: 100,
+        description:
+          'Fat burner focado. A Ioimbina HCL atua diretamente nas reservas de gordura teimosa.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/7316cad8-8290-44de-98d7-e48702e8a3e2.jpg',
+        categories: { connect: [{ id: catTermo.id }, { id: catEmagrecimento.id }] },
+      },
+    }),
+    prisma.product.create({
+      data: {
+        name: 'Diurax Potente Diurético 20 Comprimidos',
+        slug: 'diurax-diuretico-20-comprimidos',
+        price: 59.9,
+        stock: 100,
+        description:
+          'Máxima definição muscular. Elimina a retenção de líquidos indesejada de forma rápida e segura.',
+        imageUrl:
+          'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/daa420fa-16b5-4f1c-981e-70f0283f15fb.jpg',
+        categories: { connect: [{ id: catEmagrecimento.id }] },
+      },
+    }),
   ]);
 
-  console.log('🎁 Criando Kits com descontos estratégicos...');
-  
-  const createKit = async (name: string, slug: string, desc: string, prodIndexes: number[], discountPerc: number, photoUrl: string) => {
-    const selectedProds = prodIndexes.map(i => products[i]);
-    const originalPrice = selectedProds.reduce((sum, p) => sum + Number(p.price), 0);
-    const finalPrice = originalPrice * (1 - discountPerc / 100);
-
-    return prisma.kit.create({
-      data: {
-        name, slug, description: desc,
-        discountType: 'PERCENTAGE',
-        discountValue: discountPerc,
-        finalPrice,
-        imageUrl: photoUrl,
-        items: {
-          create: selectedProds.map(p => ({ productId: p.id, quantity: 1 }))
-        }
-      }
-    });
-  };
-
-  // Kits Originais
-  await createKit(
-    'Havoc Pack - Força Bruta', 'pack-forca-bruta', 
-    'O combo definitivo para esmagar seus treinos: Whey Elite + Creatina Pure + Pré-Treino Nuclear.', 
-    [0, 4, 3], 15, 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?q=80&w=1000&auto=format&fit=crop'
+  console.log(
+    `✅ Seed finalizado! O seu banco de dados está agora populado com 49 produtos e filtros N:N avançados.`,
   );
-
-  await createKit(
-    'Havoc Pack - Projeto Verão', 'pack-projeto-verao', 
-    'Definição e queima calórica intensa. O suporte que você precisa para secar com saúde.', 
-    [6, 0, 7], 12, 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?q=80&w=1000&auto=format&fit=crop'
-  );
-
-  // Novos Kits com os Lotes 1, 2 e 3
-  await createKit(
-    'Combo Seca Tudo (Definição Extrema)', 'combo-seca-tudo', 
-    'A tríade da definição: Termogênico Skinni Bull para queimar, Diurético DiuraX para desinchar e Yohimbine para gordura localizada.', 
-    [35, 17, 24], 20, 'https://images.unsplash.com/photo-1605296867304-46d5465a13f1?q=80&w=1000&auto=format&fit=crop'
-  );
-
-  await createKit(
-    'Combo Hipertrofia Monster', 'combo-hipertrofia-monster', 
-    'Ganhe volume de verdade. Hipercalórico Creamass com Creatina Micronizada Black Skull e Whey 100% HD.', 
-    [11, 12, 18], 15, 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?q=80&w=1000&auto=format&fit=crop'
-  );
-
-  await createKit(
-    'Combo Performance & Pump', 'combo-performance-pump', 
-    'Treinos insanos exigem o melhor. Pré-Treino Diabo Verde, Creatina Havoc Pure e o pré-treino sem cafeína Warzone para vascularização.', 
-    [22, 4, 15], 10, 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?q=80&w=1000&auto=format&fit=crop'
-  );
-
-  await createKit(
-    'Combo Saúde, Sono e Imunidade', 'combo-saude-sono-imunidade', 
-    'Recuperação total pós-treino. Magnésio & Inositol para dormir bem, Complexo B para energia celular e Multivitamínico completo.', 
-    [26, 27, 7], 18, 'https://images.unsplash.com/photo-1505576399279-565b52d4ac71?q=80&w=1000&auto=format&fit=crop'
-  );
-
-  await createKit(
-    'Pack Isolado Premium (Zero Lactose)', 'pack-isolado-premium', 
-    'Apenas a mais alta pureza. Dux Whey Isolado e Vitafor Isofort para uma absorção sem igual no seu pós-treino.', 
-    [19, 32], 12, 'https://images.unsplash.com/photo-1579722820308-d74e5719d38e?q=80&w=1000&auto=format&fit=crop'
-  );
-
-  console.log('💸 Gerando histórico de vendas e pedidos...');
-  const statuses: OrderStatus[] = ['DELIVERED', 'SHIPPED', 'PROCESSING', 'CONFIRMED', 'PENDING'];
-  
-  for (let i = 1; i <= 35; i++) {
-    const numItems = Math.floor(Math.random() * 2) + 1;
-    const shuffled = [...products].sort(() => 0.5 - Math.random()).slice(0, numItems);
-
-    let subtotal = 0;
-    const itemsData = shuffled.map(p => {
-      const q = Math.floor(Math.random() * 2) + 1;
-      const price = Number(p.price);
-      subtotal += price * q;
-      return { productId: p.id, quantity: q, unitPrice: price, totalPrice: price * q };
-    });
-
-    const client = getRandomClient();
-
-    await prisma.order.create({
-      data: {
-        code: `HAV-${40000 + i}`,
-        status: statuses[Math.floor(Math.random() * statuses.length)],
-        subtotal, 
-        shippingCost: 15.90, 
-        total: subtotal + 15.90,
-        // 👉 NOVO: Adicionado os dados do cliente (campos que criamos antes)
-        customerName: client.name,
-        customerPhone: client.phone,
-        userId: testUser.id, // Opcional, atrelando ao testUser criado lá no topo
-        createdAt: getRandomDate(30),
-        items: { create: itemsData }
-      }
-    });
-  }
-
-  console.log('✅ Tudo pronto! Banco de dados populado com sucesso com todo o catálogo da Havoc e novos kits.');
 }
 
 main()
-  .catch(e => { 
-    console.error(e); 
-    process.exit(1); 
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
   })
-  .finally(async () => { 
-    await prisma.$disconnect(); 
+  .finally(async () => {
+    await prisma.$disconnect();
   });
