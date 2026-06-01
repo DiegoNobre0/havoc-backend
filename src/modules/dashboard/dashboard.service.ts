@@ -56,11 +56,19 @@ export class DashboardService {
     if (cached) return JSON.parse(cached);
 
     // Agrupa os itens de pedido pelo productId e soma as quantidades e valores
+    // Agrupa os itens de pedido pelo productId e soma as quantidades e valores
     const topItems = await prisma.orderItem.groupBy({
       by: ['productId'],
       _sum: { quantity: true, totalPrice: true },
       orderBy: { _sum: { quantity: 'desc' } },
-      where: { productId: { not: null } }, // Ignora itens que eram só de kits se houver
+      where: {
+        productId: { not: null },
+        order: {
+          status: {
+            in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'],
+          },
+        },
+      },
       take: limit,
     });
 
