@@ -264,7 +264,7 @@ export class ChatbotContext {
         textoResposta += `Assim que o pagamento for aprovado, nosso sistema confirma tudo automaticamente por aqui! 🚀`;
       } else if (dadosCheckout.metodo_pagamento === 'CARTAO') {
         textoResposta += `💳 *PAGAMENTO NO CARTÃO* 💳\n`;
-        textoResposta += `Acesse seu link seguro para finalizar a compra em até 12x:\n\n`;
+        textoResposta += `Acesse seu link seguro para finalizar a compra:\n\n`;
         textoResposta += `${linkPagamento}\n\n`;
         textoResposta += `Após o pagamento, seu pedido será confirmado automaticamente! 🚀`;
       } else {
