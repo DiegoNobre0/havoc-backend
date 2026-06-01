@@ -55,8 +55,6 @@ export class DashboardService {
     const cached = await redis.get(cacheKey);
     if (cached) return JSON.parse(cached);
 
-    // Agrupa os itens de pedido pelo productId e soma as quantidades e valores
-    // Agrupa os itens de pedido pelo productId e soma as quantidades e valores
     const topItems = await prisma.orderItem.groupBy({
       by: ['productId'],
       _sum: { quantity: true, totalPrice: true },
