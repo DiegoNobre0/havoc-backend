@@ -253,4 +253,29 @@ export class PaymentsService {
     if (!payment) throw new AppError('Pagamento não encontrado.', 404);
     return payment;
   }
+
+  // ==============================================================
+  // 👉 4. TESTE RÁPIDO DE IMPRESSÃO (PÚBLICO)
+  // ==============================================================
+  async testPrint() {
+    if (!io) throw new AppError('Socket.io não inicializado', 500);
+
+    const cupomTeste = {
+      codigo: `TESTE-${Math.floor(Math.random() * 10000)}`,
+      cliente: 'Diego Nobre (Teste Nobre Labs)',
+      telefone: '71999999999',
+      endereco: '>>> RETIRADA BALCÃO <<<',
+      itens: ['1x Whey Protein Isolado 900g - Teste', '2x Creatina 300g - Teste'],
+      total: '199.90',
+      data: new Date().toLocaleString('pt-BR'),
+    };
+
+    io.to('loja_fisica').emit('imprimir_cupom', cupomTeste);
+    console.log(`[Teste de Impressão] 🖨️ Ordem de teste enviada para a loja física.`);
+
+    return {
+      message: 'Comando de impressão enviado com sucesso!',
+      cupom: cupomTeste,
+    };
+  }
 }

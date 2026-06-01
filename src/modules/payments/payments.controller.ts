@@ -58,4 +58,9 @@ export class PaymentsController {
     // Devolve 200 imediatamente para o MP não bloquear nossa API
     return reply.status(200).send('OK');
   }
+
+  async testPrint(request: FastifyRequest, reply: FastifyReply) {
+    const result = await this.service.testPrint();
+    return reply.status(200).send(result);
+  }
 }
