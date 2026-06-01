@@ -237,7 +237,7 @@ export class PaymentsService {
           endereco: updatedOrder.deliveryAddress || '>>> RETIRADA BALCÃO <<<',
           itens: updatedOrder.items.map((i) => `${i.quantity}x ${i.product?.name || i.kit?.name}`),
           total: updatedOrder.total,
-          data: new Date().toLocaleString('pt-BR'),
+          data: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
         };
 
         io.to('loja_fisica').emit('imprimir_cupom', cupom);
