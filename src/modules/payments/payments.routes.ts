@@ -18,14 +18,14 @@ export async function paymentsRoutes(app: FastifyInstance) {
     controller.webhook.bind(controller),
   );
 
-  app.post(
+  // 🔥 Rota pública para teste rápido de impressão (agora como GET)
+  app.get(
     '/print-test',
     {
       schema: { tags: ['Teste'], summary: 'Dispara uma impressão de teste na loja física' },
     },
     controller.testPrint.bind(controller),
   );
-
   // ==========================================
   // 🔒 ROTAS PROTEGIDAS (GERAÇÃO E STATUS)
   // ==========================================
