@@ -15,7 +15,7 @@ export class AuthController {
     const authService = new AuthService();
     const user = await authService.authenticate(data);
 
-    // 3. Geração do Access Token (JWT curto - 15 min)
+    // 3. Geração do Access Token
     const accessToken = await reply.jwtSign(
       {
         sub: user.id,
@@ -68,7 +68,7 @@ export class AuthController {
     // 3. Deleta o token antigo (Rotação de Token - Previne roubos)
     await redis.del(`refresh_token:${refreshToken}`);
 
-    // 4. Gera NOVO Access Token (15 min)
+    // 4. Gera NOVO Access Token
     const newAccessToken = await reply.jwtSign(
       { sub: user.id, role: user.role },
       { sign: { expiresIn: '7d' } },
