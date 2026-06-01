@@ -108,8 +108,7 @@ export class OrderService {
           } else {
             mensagemAutomativa = `✅ *PAGAMENTO CONFIRMADO!*\nMaravilha, ${primeiroNome}! O pagamento do seu pedido *#${order.code}* caiu certinho. Ele já vai descer pra equipe preparar sua retirada! 🚀`;
           }
-        }
-        if (status === 'PROCESSING') {
+        } else if (status === 'PROCESSING') {
           if (isDelivery) {
             mensagemAutomativa = `📦 Olá, ${primeiroNome}! O seu pedido *#${order.code}* acabou de ir para a fila de preparo. Logo mais ele sai para entrega! 🛵`;
           } else {

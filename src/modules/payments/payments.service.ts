@@ -3,6 +3,7 @@ import { AppError } from '../../shared/errors/AppError.js';
 import axiosStatic from 'axios';
 import { io } from '../../shared/socket/socket.js';
 import crypto from 'crypto';
+import { WhatsAppIntegrationService } from '../../integrations/whatsapp/whatsappIntegration.service.js';
 
 export class PaymentsService {
   // ─── CREDENCIAIS MERCADO PAGO (VIA .ENV) ───────────────────────────
@@ -242,6 +243,32 @@ export class PaymentsService {
 
         io.to('loja_fisica').emit('imprimir_cupom', cupom);
         console.log(`[Impressão MP] 🖨️ Ordem enviada para a loja: Pedido ${updatedOrder.code}`);
+      }
+
+      try {
+        const whatsapp = new WhatsAppIntegrationService();
+
+        // Descobre se é entrega ou retirada olhando para o endereço
+        const isDelivery =
+          updatedOrder.deliveryAddress !== null &&
+          updatedOrder.deliveryAddress !== '>>> RETIRADA BALCÃO <<<';
+        const primeiroNome = updatedOrder.customerName
+          ? updatedOrder.customerName.split(' ')[0]
+          : 'Cliente';
+
+        let mensagemConfirmacao = '';
+        if (isDelivery) {
+          mensagemConfirmacao = `✅ *PAGAMENTO CONFIRMADO!*\nUhull, ${primeiroNome}! Recebemos o seu pagamento do pedido *#${updatedOrder.code}*. Ele já vai descer pra equipe separar e mandar pra você! 🚀`;
+        } else {
+          mensagemConfirmacao = `✅ *PAGAMENTO CONFIRMADO!*\nMaravilha, ${primeiroNome}! O pagamento do seu pedido *#${updatedOrder.code}* caiu certinho. Ele já vai descer pra equipe preparar sua retirada! 🚀`;
+        }
+
+        await whatsapp.sendTextMessage(updatedOrder.customerPhone, mensagemConfirmacao);
+        console.log(
+          `[WhatsApp] 📲 Mensagem de pagamento confirmado enviada para ${updatedOrder.customerPhone}`,
+        );
+      } catch (zapError) {
+        console.error('[WhatsApp Error] Falha ao enviar confirmação de pagamento:', zapError);
       }
     } catch (error: any) {
       console.error('[Mercado Pago Webhook Error]: Falha ao processar notificação', error.message);
