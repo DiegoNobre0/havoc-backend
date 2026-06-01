@@ -102,7 +102,13 @@ export class OrderService {
         const isDelivery = !!order.deliveryAddress;
         let mensagemAutomativa = '';
 
-        // 👉 AVALIA O STATUS DO KANBAN PARA ENVIAR A MENSAGEM
+        if (status === 'CONFIRMED') {
+          if (isDelivery) {
+            mensagemAutomativa = `✅ *PAGAMENTO CONFIRMADO!*\nUhull, ${primeiroNome}! Recebemos o seu pagamento do pedido *#${order.code}*. Ele já vai descer pra equipe separar e mandar pra você! 🚀`;
+          } else {
+            mensagemAutomativa = `✅ *PAGAMENTO CONFIRMADO!*\nMaravilha, ${primeiroNome}! O pagamento do seu pedido *#${order.code}* caiu certinho. Ele já vai descer pra equipe preparar sua retirada! 🚀`;
+          }
+        }
         if (status === 'PROCESSING') {
           if (isDelivery) {
             mensagemAutomativa = `📦 Olá, ${primeiroNome}! O seu pedido *#${order.code}* acabou de ir para a fila de preparo. Logo mais ele sai para entrega! 🛵`;
