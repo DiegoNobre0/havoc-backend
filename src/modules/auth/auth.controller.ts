@@ -6,7 +6,6 @@ import { loginBodySchema } from './auth.schemas.js';
 import { redis } from '../../shared/redis/redis.js';
 import { AppError } from '../../shared/errors/AppError.js';
 
-
 export class AuthController {
   async login(request: FastifyRequest, reply: FastifyReply) {
     // 1. Validação estrita
@@ -18,28 +17,29 @@ export class AuthController {
 
     // 3. Geração do Access Token (JWT curto - 15 min)
     const accessToken = await reply.jwtSign(
-      { 
+      {
         sub: user.id,
-        role: user.role }, // Payload adicional
+        role: user.role,
+      }, // Payload adicional
       {
         sign: {
           sub: user.id, // Subject = ID do usuário
-          expiresIn: '15m',
+          expiresIn: '7d',
         },
-      }
+      },
     );
 
     // 4. Geração do Refresh Token (Token longo e opaco - 7 dias)
     // Usamos UUID puro no lugar de um JWT para ter controle total de revogação no Redis
     const refreshToken = crypto.randomUUID();
-    const TEMPO_7_DIAS_EM_SEGUNDOS = 60 * 60 * 24 * 7; 
+    const TEMPO_7_DIAS_EM_SEGUNDOS = 60 * 60 * 24 * 7;
 
     // Salva no Redis com chave única (ex: "refresh_token:12345")
     await redis.set(
       `refresh_token:${refreshToken}`,
       user.id,
       'EX', // Configura tempo de expiração nativo do Redis
-      TEMPO_7_DIAS_EM_SEGUNDOS
+      TEMPO_7_DIAS_EM_SEGUNDOS,
     );
 
     // 5. Devolve o kit completo para o Frontend
@@ -49,8 +49,6 @@ export class AuthController {
       refreshToken,
     });
   }
-
-
 
   // --- ROTA DE REFRESH TOKEN ---
   async refresh(request: FastifyRequest, reply: FastifyReply) {
@@ -73,19 +71,14 @@ export class AuthController {
     // 4. Gera NOVO Access Token (15 min)
     const newAccessToken = await reply.jwtSign(
       { sub: user.id, role: user.role },
-      { sign: { expiresIn: '15m' } }
+      { sign: { expiresIn: '7d' } },
     );
 
     // 5. Gera NOVO Refresh Token (7 dias)
     const newRefreshToken = crypto.randomUUID();
     const TEMPO_7_DIAS_EM_SEGUNDOS = 60 * 60 * 24 * 7;
 
-    await redis.set(
-      `refresh_token:${newRefreshToken}`,
-      user.id,
-      'EX',
-      TEMPO_7_DIAS_EM_SEGUNDOS
-    );
+    await redis.set(`refresh_token:${newRefreshToken}`, user.id, 'EX', TEMPO_7_DIAS_EM_SEGUNDOS);
 
     return reply.status(200).send({
       accessToken: newAccessToken,
