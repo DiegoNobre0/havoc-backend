@@ -355,48 +355,44 @@ Carrinho atual: ${carrinhoTexto}.
 
       // ── Envio ────────────────────────────────────────────────
       if (aiResponse.content) {
-        const imgRegex = /\[IMG:(.*?)\]/g;
-        const confirmTagParaLimpar = /\[CONFIRM:(.*?)\]/g;
-        const toolTagRegex = /<function[^>]*>[\s\S]*?<\/function>/g;
-
+        const imgRegex = /\[IMG:(.*?)\]/gi;
         const imagesToSend: string[] = [];
-        let match;
-
-        while ((match = imgRegex.exec(aiResponse.content)) !== null) {
-          imagesToSend.push(match[1]);
+        let imgMatch;
+        while ((imgMatch = imgRegex.exec(aiResponse.content)) !== null) {
+          imagesToSend.push(imgMatch[1].trim());
         }
 
         console.log(`\n[DEBUG IA RAW] Resposta bruta da IA:\n${aiResponse.content}\n`);
 
-        const confirmMatch = aiResponse.content.match(/\[CONFIRM:(.*?)\]/);
-        const productName = confirmMatch?.[1] ?? null;
+        // 2. EXTRAÇÃO ROBUSTA DO NOME DO PRODUTO (Botão de Confirmar)
+        // Mudamos o .*? para [\s\S]*? para pegar o nome mesmo se tiver espaços loucos
+        const confirmMatch = aiResponse.content.match(/\[CONFIRM:([\s\S]*?)\]/i);
+        const productName = confirmMatch?.[1]?.trim() ?? null;
 
-        // 1. Regex à prova de erros (pega SUGESTAO com 1 ou 2 G's)
-        const sugestaoMatch = aiResponse.content.match(/\[SUG+ESTAO:(.*?)\]/i);
-
-        // 2. Extrai o produto
+        // 3. EXTRAÇÃO DO PRODUTO SUGERIDO (Upsell)
+        const sugestaoMatch = aiResponse.content.match(/\[SUG+ESTAO:([\s\S]*?)\]/i);
         let produtoSugerido = sugestaoMatch ? sugestaoMatch[1].trim() : '';
-        // Se a IA colocar um ponto e vírgula no final da tag por engano, nós limpamos
         produtoSugerido = produtoSugerido.replace(';', '').trim();
 
-        const pixMatch = aiResponse.content.match(/\[PIX:(.*?)\]/i);
+        // 4. EXTRAÇÃO DO PIX
+        const pixMatch = aiResponse.content.match(/\[PIX:([\s\S]*?)\]/i);
         const pixCode = pixMatch ? pixMatch[1].trim() : null;
 
         const hasFinalConfirmButtons = aiResponse.content.includes('[BOTOES_CONFIRMACAO_FINAL]');
 
+        // 5. LIMPANDO TODAS AS TAGS DA TELA DO CLIENTE
         let finalContent = aiResponse.content
-          .replace(imgRegex, '')
-          .replace(confirmTagParaLimpar, '')
-          .replace(toolTagRegex, '')
-          .replace(/\[SUGESTAO:(.*?)\]/gi, '')
-          .replace(/\[SUGGESTAO:(.*?)\]/gi, '')
+          .replace(/\[IMG:[\s\S]*?\]/gi, '')
+          .replace(/\[CONFIRM:[\s\S]*?\]/gi, '') // Limpeza robusta
+          .replace(/<function[^>]*>[\s\S]*?<\/function>/g, '')
+          .replace(/\[SUGESTAO:[\s\S]*?\]/gi, '')
+          .replace(/\[SUGGESTAO:[\s\S]*?\]/gi, '')
           .replace(/;/g, '')
-          .replace(/\[PIX:(.*?)\]/gi, '')
-          .replace(/\[BOTOES_CONFIRMACAO_FINAL\]/gi, '') // 👉 LIMPA A NOVA TAG
+          .replace(/\[PIX:[\s\S]*?\]/gi, '')
+          .replace(/\[BOTOES_CONFIRMACAO_FINAL\]/gi, '')
           .replace(/\[BOTOES_UPSELL\]/g, '')
           .trim();
 
-        // 3. Agora sim, isso só será True se a IA gerou a tag ou fez a pergunta
         const hasUpsellButtons =
           produtoSugerido !== '' || finalContent.toLowerCase().includes('dar uma olhada');
         finalContent = finalContent.replace(/\[BOTOES_UPSELL\]/g, '').trim();
