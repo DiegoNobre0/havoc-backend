@@ -3,14 +3,25 @@ import { ProductService } from './product.service.js';
 
 import { StorageService } from '../../../shared/services/storage.service.js';
 
-
 export class ProductController {
   private service = new ProductService();
   private storage = new StorageService();
 
   async list(request: FastifyRequest<{ Querystring: any }>, reply: FastifyReply) {
-    const { page, limit, search, categoryId } : any= request.query;
-    const data = await this.service.findMany(page, limit, search, categoryId);
+    const { page = 1, limit = 10, search, categoryId, isActive }: any = request.query;
+
+    let parsedIsActive;
+    if (isActive === 'true') parsedIsActive = true;
+    else if (isActive === 'false') parsedIsActive = false;
+
+    const data = await this.service.findMany(
+      Number(page),
+      Number(limit),
+      search,
+      categoryId,
+      parsedIsActive,
+    );
+
     return reply.send(data);
   }
 
@@ -38,9 +49,9 @@ export class ProductController {
       const { url, key } = await this.storage.uploadFile('products', file);
 
       // Atualiza o produto com a URL retornada
-      await this.service.update(request.params.id, { 
+      await this.service.update(request.params.id, {
         imageUrl: url,
-        imageKey: key 
+        imageKey: key,
       });
 
       return reply.send({ url });
@@ -49,7 +60,10 @@ export class ProductController {
     }
   }
 
-  async toggleStatus(request: FastifyRequest<{ Params: { id: string }, Body: { isActive: boolean } }>, reply: FastifyReply) {
+  async toggleStatus(
+    request: FastifyRequest<{ Params: { id: string }; Body: { isActive: boolean } }>,
+    reply: FastifyReply,
+  ) {
     const { isActive } = request.body;
     const data = await this.service.toggleStatus(request.params.id, isActive);
     return reply.send(data);

@@ -1,5 +1,5 @@
-import { prisma } from "../../../database/prisma.js";
-import { redis } from "../../../shared/redis/redis.js";
+import { prisma } from '../../../database/prisma.js';
+import { redis } from '../../../shared/redis/redis.js';
 import crypto from 'crypto';
 
 export class ProductService {
@@ -11,8 +11,14 @@ export class ProductService {
     if (keys.length > 0) await redis.del(keys);
   }
 
-  async findMany(page: number, limit: number, search?: string, categoryId?: string) {
-    const cacheKey = `${this.CACHE_PREFIX}page:${page}:limit:${limit}:search:${search || 'all'}:cat:${categoryId || 'all'}`;
+  async findMany(
+    page: number,
+    limit: number,
+    search?: string,
+    categoryId?: string,
+    isActive?: boolean,
+  ) {
+    const cacheKey = `${this.CACHE_PREFIX}page:${page}:limit:${limit}:search:${search || 'all'}:cat:${categoryId || 'all'}:active:${isActive || 'all'}`;
     const cached = await redis.get(cacheKey);
     if (cached) return JSON.parse(cached);
 
@@ -26,6 +32,8 @@ export class ProductService {
       where.categories = { some: { id: categoryId } };
     }
 
+    if (isActive !== undefined) where.isActive = isActive;
+
     const [total, products] = await Promise.all([
       prisma.product.count({ where }),
       prisma.product.findMany({
@@ -33,13 +41,13 @@ export class ProductService {
         skip,
         take: limit,
         include: { categories: { select: { id: true, name: true } } }, // 👉 Retorna um Array agora
-        orderBy: { createdAt: 'desc' }
-      })
+        orderBy: { createdAt: 'desc' },
+      }),
     ]);
 
     const result = {
       data: products,
-      meta: { total, page, limit, totalPages: Math.ceil(total / limit) }
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
 
     await redis.set(cacheKey, JSON.stringify(result), 'EX', 600);
@@ -51,7 +59,7 @@ export class ProductService {
 
     // 1. Verifica se o slug já existe
     const existingProduct = await prisma.product.findUnique({
-      where: { slug: rest.slug }
+      where: { slug: rest.slug },
     });
 
     // 2. Se o slug existir, adiciona um hash curto para torná-lo único
@@ -63,8 +71,10 @@ export class ProductService {
     const product = await prisma.product.create({
       data: {
         ...rest,
-        categories: categoryIds ? { connect: categoryIds.map((id: string) => ({ id })) } : undefined
-      }
+        categories: categoryIds
+          ? { connect: categoryIds.map((id: string) => ({ id })) }
+          : undefined,
+      },
     });
 
     await this.clearCache();
@@ -78,8 +88,8 @@ export class ProductService {
       data: {
         ...rest,
         // O "set" limpa as relações antigas e cria as novas
-        categories: categoryIds ? { set: categoryIds.map((id: string) => ({ id })) } : undefined
-      }
+        categories: categoryIds ? { set: categoryIds.map((id: string) => ({ id })) } : undefined,
+      },
     });
     await this.clearCache();
     return product;
@@ -89,7 +99,7 @@ export class ProductService {
     const product = await prisma.product.update({
       where: { id },
       data: { isActive },
-      select: { id: true, isActive: true } // Retorna só o necessário
+      select: { id: true, isActive: true }, // Retorna só o necessário
     });
     await this.clearCache();
     return product;
@@ -98,7 +108,7 @@ export class ProductService {
   async softDelete(id: string) {
     const product = await prisma.product.update({
       where: { id },
-      data: { deletedAt: new Date(), isActive: false }
+      data: { deletedAt: new Date(), isActive: false },
     });
     await this.clearCache();
     return product;
