@@ -178,27 +178,51 @@ Visão identificou: "${descricao}".
         return;
       }
 
-      // No worker, ANTES de chamar a IA, adicione este interceptador:
-      const ehNumero = /^\d+$/.test(textoFinal?.trim() || '');
+      const inputLimpo = textoFinal?.trim() || '';
+      const ehNumero = /^\d+$/.test(inputLimpo);
 
-      if (ehNumero) {
-        const listaCache = await (redis as any).get(`lista_produtos:${sKey}`);
-        if (listaCache) {
-          const lista: string[] = JSON.parse(listaCache);
-          const indice = parseInt(textoFinal.trim()) - 1;
-          const nomeProduto = lista[indice];
+      const listaCache = await (redis as any).get(`lista_produtos:${sKey}`);
+      let interceptouProduto = false;
 
-          if (nomeProduto) {
-            textoParaHistorico = `Quero ver o produto: ${nomeProduto}`;
-            textoFinal = `[FORCAR_DETALHES:${nomeProduto}]
-O cliente escolheu o item ${textoFinal} da lista, que corresponde a "${nomeProduto}".
-⚠️ INSTRUÇÃO DO SISTEMA: Chame IMEDIATAMENTE a ferramenta 'ver_detalhes_do_produto' passando EXATAMENTE "${nomeProduto}".`;
+      if (listaCache) {
+        const lista: string[] = JSON.parse(listaCache);
+        let nomeProdutoEncontrado = null;
+
+        if (ehNumero) {
+          // Se digitou o número 1, 2, 3...
+          const indice = parseInt(inputLimpo) - 1;
+          nomeProdutoEncontrado = lista[indice];
+        } else if (inputLimpo.length > 2) {
+          // Se digitou parte do texto (ex: "max titanium 500g")
+          // Ignora palavras soltas do funil
+          const palavrasIgnoradas = ['sim', 'nao', 'não', 'quero', 'esse', 'gostei', 'ok'];
+          if (!palavrasIgnoradas.includes(inputLimpo.toLowerCase())) {
+            // Procura se o texto digitado bate com algum item da lista do Redis
+            const palavrasDigitadas = inputLimpo.toLowerCase().split(' ');
+
+            nomeProdutoEncontrado = lista.find((p: string) => {
+              const nomeProdutoLower = p.toLowerCase();
+              // Verifica se cada palavra que o cliente digitou existe dentro do nome do produto
+              return palavrasDigitadas.every((palavra: string) =>
+                nomeProdutoLower.includes(palavra),
+              );
+            });
           }
-        } else {
-          // 👉 FALLBACK NOVO: Se o Redis sumiu, obriga a IA a olhar o contexto e chamar a tool
-          textoFinal = `O cliente digitou a opção número "${textoFinal}".
-⚠️ INSTRUÇÃO DO SISTEMA: Chame a ferramenta 'ver_detalhes_do_produto' AGORA passando o NOME COMPLETO do item ${textoFinal} que você listou na sua última mensagem. NÃO repasse a descrição da sua memória.`;
         }
+
+        if (nomeProdutoEncontrado) {
+          interceptouProduto = true;
+          textoParaHistorico = `Quero ver o produto: ${nomeProdutoEncontrado}`;
+          textoFinal = `[FORCAR_DETALHES:${nomeProdutoEncontrado}]
+O cliente escolheu o item "${inputLimpo}" da lista, que corresponde a "${nomeProdutoEncontrado}".
+⚠️ INSTRUÇÃO DO SISTEMA: Chame IMEDIATAMENTE a ferramenta 'ver_detalhes_do_produto' passando EXATAMENTE "${nomeProdutoEncontrado}".`;
+        }
+      }
+
+      // Fallback antigo de segurança caso o Redis tenha apagado a lista por tempo
+      if (!interceptouProduto && ehNumero) {
+        textoFinal = `O cliente digitou a opção número "${inputLimpo}".
+⚠️ INSTRUÇÃO DO SISTEMA: Chame a ferramenta 'ver_detalhes_do_produto' AGORA passando o NOME COMPLETO do item ${inputLimpo} que você listou na sua última mensagem. NÃO repasse a descrição da sua memória.`;
       }
 
       // ── Interceptadores de Botões de Ação ────────────────────
