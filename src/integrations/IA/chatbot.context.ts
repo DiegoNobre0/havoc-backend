@@ -102,7 +102,7 @@ export class ChatbotContext {
           { categories: { some: { name: { contains: termoBusca, mode: 'insensitive' } } } },
         ],
       },
-      take: 10, // Traz no máximo 4 opções para não poluir o WhatsApp do cliente
+      take: 12,
       select: {
         id: true,
         name: true,
@@ -335,7 +335,8 @@ export class ChatbotContext {
     let termoLimpo = termoBusca
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '') // Tira acentos
-      .toLowerCase();
+      .toLowerCase()
+      .trim();
 
     // Dicionário de palavras inúteis
     const palavrasInuteis = [
@@ -402,8 +403,8 @@ export class ChatbotContext {
 
     // 2. BUSCA EXCLUSIVA NOS PRODUTOS ISOLADOS (A Mágica da Limpeza)
     const products = await prisma.product.findMany({
-      where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
-      take: 6,
+      where: { isActive: true, AND: condicoesAND },
+      take: 12,
       select: { name: true, price: true },
     });
 

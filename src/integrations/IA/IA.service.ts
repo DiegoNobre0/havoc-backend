@@ -398,12 +398,17 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
         function: {
           name: 'listar_produtos',
           description: `Busca produtos e acessórios no banco de dados. 
-⚠️ REGRA DE OURO DA BUSCA (CONTEXTO + MARCA):
-Você DEVE combinar o tipo de produto que o cliente deseja com a marca ou característica solicitada para a busca ser cirúrgica.
-- Se o cliente quer Massa Magra/Proteína e pediu a marca Black Skull -> o termo_busca DEVE ser 'whey black skull'.
-- Se o cliente quer Creatina e pediu Dux -> envie 'creatin dux'.
-- Se pedir Pré-treino -> envie 'treino'.
-NUNCA envie apenas a marca se você já sabe qual objetivo ou produto o cliente quer. Use as palavras principais separadas por espaço.`,
+⚠️ REGRA DE OURO (TRADUÇÃO E MAPEAMENTO DO CATÁLOGO):
+O banco de dados possui nomes em Inglês e Português misturados (ex: "Creatine", "Beef Protein", "Thermogenic").
+Para a busca não falhar, VOCÊ (IA) DEVE adaptar o pedido do cliente para a RAIZ da palavra no banco de dados.
+Siga ESTE MAPEAMENTO OBRIGATÓRIO de conversão:
+1. Se o cliente pedir "Creatina" -> envie termo_busca: 'creatin' (acha tanto Creatina quanto Creatine).
+2. Se o cliente pedir "Proteína", "Massa" ou "Whey" -> envie termo_busca: 'whey' OU 'protein'.
+3. Se o cliente pedir "Proteína da carne" -> envie termo_busca: 'beef' OU 'carnibol'.
+4. Se o cliente pedir "Albumina" ou "Proteína do ovo" -> envie termo_busca: 'albumina' OU 'uevo'.
+5. Se o cliente pedir "Pré-treino" ou "Energia" -> envie termo_busca: 'treino' OU 'booster' OU 'rush'.
+6. Se o cliente pedir "Termogênico", "Emagrecer" ou "Secar" -> envie termo_busca: 'thermogenic' OU 'trinka'.
+7. Se o cliente pedir uma marca (ex: Max Titanium, Dux, Under Labz) junto com o produto, envie a marca e a raiz (ex: 'creatin dux' ou 'whey max').`,
           parameters: {
             type: 'object',
             properties: { termo_busca: { type: 'string' } },
