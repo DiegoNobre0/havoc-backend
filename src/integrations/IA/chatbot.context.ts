@@ -198,10 +198,32 @@ export class ChatbotContext {
       }
 
       // 3. Calcula Frete Fixo e define o endereço completo
-      const frete = dadosCheckout.metodo_entrega === 'ENTREGA' ? 15.0 : 0.0;
-      const total = subtotal + frete;
       const deliveryAddress =
         dadosCheckout.metodo_entrega === 'ENTREGA' ? dadosCheckout.endereco_ou_cep : null;
+      let frete = 0.0;
+
+      if (deliveryAddress) {
+        const inputLimpo = deliveryAddress.toLowerCase();
+        let rule = null;
+
+        // Tenta achar por Bairro (Region)
+        const regras = await prisma.shippingRule.findMany({
+          where: { isActive: true, region: { not: null } },
+        });
+        rule = regras.find((r) => inputLimpo.includes(String(r.region).toLowerCase())) || null;
+
+        // Tenta Taxa Padrão (Sem Region)
+        if (!rule) {
+          rule = await prisma.shippingRule.findFirst({
+            where: { isActive: true, region: null },
+            orderBy: { price: 'asc' },
+          });
+        }
+
+        frete = rule ? Number(rule.price) : 15.0; // Usa 15 como segurança se o DB estiver vazio
+      }
+
+      const total = subtotal + frete;
 
       // 4. CRIA O PEDIDO NO BANCO COM OS NOVOS CAMPOS DO CLIENTE E ENDEREÇO
       const novoPedido = await prisma.order.create({
@@ -547,6 +569,43 @@ export class ChatbotContext {
     } catch (error) {
       console.error('[Excluir Conversa Error]:', error);
       return `erro`;
+    }
+  }
+
+  async calcularFrete(enderecoCompleto: string): Promise<string> {
+    const inputLimpo = enderecoCompleto.toLowerCase();
+    let rule = null;
+
+    try {
+      // 1. BUSCA POR BAIRRO (A Mágica da Palavra-Chave)
+      // Pega todas as regras que tem a coluna 'region' preenchida
+      const regrasPorBairro = await prisma.shippingRule.findMany({
+        where: { isActive: true, region: { not: null } },
+      });
+
+      // Varre a lista de regras para ver se o Bairro (region) existe dentro do texto do cliente
+      rule =
+        regrasPorBairro.find((r) => inputLimpo.includes(String(r.region).toLowerCase())) || null;
+
+      // 2. FALLBACK DA TAXA PADRÃO
+      // Se não achou o bairro na mensagem, pega a regra de frete padrão (aquela que tem a region vazia)
+      if (!rule) {
+        rule = await prisma.shippingRule.findFirst({
+          where: { isActive: true, region: null },
+          orderBy: { price: 'asc' },
+        });
+      }
+
+      // 3. FALLBACK DE SEGURANÇA (Caso você esqueça de cadastrar regras no painel)
+      if (!rule) {
+        return `Frete para o endereço informado: R$ 15,00 via Uber Flash. O envio é imediato após a confirmação do pagamento!`;
+      }
+
+      // 4. DEVOLVE O TEXTO DINÂMICO
+      return `Frete para o endereço informado: R$ ${Number(rule.price).toFixed(2).replace('.', ',')} via ${rule.name}. O envio é imediato após a confirmação do pagamento!`;
+    } catch (error) {
+      console.error('[Erro ao calcular frete no DB]:', error);
+      return `Frete para o endereço informado: R$ 15,00 via Uber Flash (valor estimado). O envio é imediato após a confirmação!`;
     }
   }
 

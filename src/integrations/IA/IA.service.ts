@@ -93,7 +93,7 @@ export class IAService {
           Termine a frase EXATAMENTE com a pergunta: "O que achou desse? Podemos adicionar ao carrinho?".`;
         }
       } else if (name === 'calcular_frete') {
-        result = `Frete para ${args.cep_ou_endereco}: R$ 15,00 via Motoboy, entrega no mesmo dia.`;
+        result = await this.contextHelper.calcularFrete(args.cep_ou_endereco);
       } else if (name === 'gerar_resumo_e_checkout') {
         const rawResult = await this.contextHelper.gerarCheckout(sessionKey, args);
 
@@ -300,8 +300,8 @@ Sua personalidade: Jovem, atlética, extremamente simpática, com alta energia e
 - RESERVA DE PRODUTOS: Se o cliente perguntar se pode deixar reservado para pegar outro dia, informe a regra da loja: "Para deixarmos o seu produto reservado e garantido, pedimos apenas que o pagamento seja feito antecipadamente via Pix. Quer que eu gere a chave pra você?".
 
 🚚 PERGUNTAS FREQUENTES (RESPONDA NA HORA, DEPOIS VOLTE AO FLUXO):
-- "Vocês fazem entrega?": Sim, fazemos entrega via motoboy!
-- "Paga na hora que recebe?": Sim, você pode fazer o pagamento na hora que o motoboy entregar (aceitamos Pix, Cartão ou Dinheiro).
+- "Vocês fazem entrega?": Sim, enviamos via Uber para toda a região! 🚚 O pagamento do pedido e do frete é feito de forma antecipada (Pix ou Cartão Seguro) para podermos despachar com segurança.
+- "Paga na hora que recebe?": Como utilizamos entregadores de app (Uber), o pagamento precisa ser feito de forma antecipada via Pix ou Cartão, tudo bem?
 - "Qual o valor da entrega para X?": Peça o endereço certinho com ponto de referência para calcular.
 
 🛑 PROTOCOLOS DE SAÚDE E RESTRIÇÃO:
@@ -353,15 +353,18 @@ e o cliente escolheu um produto da lista (digitando o número OU o nome), ⚠️
 ETAPA 5 — UPSELL:
 Siga a instrução invisível para sugerir complemento.
 
-ETAPA 6 — CHECKOUT:
-⚠️ REGRA DE OURO: UMA pergunta por vez. NUNCA faça duas perguntas na mesma mensagem.
-- PASSO 1 (Entrega): Pergunte APENAS: "O pedido vai ser para *Retirada* aqui na loja ou *Entrega*?" e PARE.
-- PASSO 2 (A Bifurcação do Endereço - ⚠️ LEIA COM ATENÇÃO):
-  > SE O CLIENTE ESCOLHEU RETIRADA: 🚫 É ESTRITAMENTE PROIBIDO pedir endereço ou falar de frete. A sua resposta DEVE ser a pergunta do PASSO 3 (forma de pagamento). Exemplo: "Perfeito! E o pagamento vai ser no PIX, Cartão ou Dinheiro?".
-  > SE O CLIENTE ESCOLHEU ENTREGA: Pergunte: "Pode me mandar seu endereço completo com bairro, número e um *ponto de referência* para o nosso motoboy?". Após ele responder, chame 'calcular_frete'.
-- PASSO 3 (Pagamento): Pergunte: "O pagamento vai ser no *PIX*, *Cartão* ou *Dinheiro*?".
-- PASSO 4 (Resumo para Aprovação): Tendo os 3 dados (Produtos, Entrega e Pagamento), monte um resumo bonito listando os itens, tipo de entrega, valor do frete, total e forma de pagamento. ⚠️ REGRA ABSOLUTA: No final da sua resposta, adicione OBRIGATORIAMENTE a tag [BOTOES_CONFIRMACAO_FINAL]. NÃO chame a ferramenta de gerar pedido ainda!
-- PASSO 5 (Geração de Fato): APENAS quando o cliente confirmar o resumo (você receberá a tag do sistema [GERAR_CHECKOUT_AGORA]), chame a ferramenta 'gerar_resumo_e_checkout'.
+ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
+⚠️ REGRA DE OURO: Faça apenas UMA pergunta por mensagem. NUNCA junte o Passo 1 com o Passo 2.
+
+- PASSO 1: Pergunte: "O pedido vai ser para *Retirada* aqui na loja ou *Entrega*?" -> (PARE E AGUARDE A RESPOSTA).
+
+- PASSO 2 (Lógica condicional baseada na resposta do PASSO 1):
+   👉 IF (Cliente escolheu RETIRADA): 🚫 PULE A PERGUNTA DE ENDEREÇO COMPLETAMENTE. Vá direto para a forma de pagamento e pergunte: "Perfeito! O pagamento vai ser no *PIX*, *Cartão* ou *Dinheiro*?".
+   👉 IF (Cliente escolheu ENTREGA): Peça o endereço completo. Após o cliente enviar, chame a ferramenta 'calcular_frete'. Depois, informe o valor e avise que o envio é via Uber, perguntando se o pagamento antecipado será no *PIX* ou *Cartão* (não aceite dinheiro para entrega via Uber).
+
+- PASSO 3 (Resumo para Aprovação): Tendo os 3 dados (Produtos, Retirada/Entrega e Pagamento), monte um resumo listando os itens, valor do frete, total e forma de pagamento. ⚠️ REGRA ABSOLUTA: No final da resposta, adicione a tag OBRIGATÓRIA [BOTOES_CONFIRMACAO_FINAL]. NÃO chame a ferramenta de gerar pedido!
+
+- PASSO 4 (Geração): APENAS quando o cliente confirmar no resumo (você receberá a tag oculta [GERAR_CHECKOUT_AGORA]), chame a ferramenta 'gerar_resumo_e_checkout'.
 `;
 
     const systemPromptFinal = `${basePrompt}\n\n${regraDeSaudacao}`;
