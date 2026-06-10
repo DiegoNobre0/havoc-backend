@@ -95,7 +95,7 @@ export class ChatbotContext {
     const products = await prisma.product.findMany({
       where: {
         isActive: true,
-        stock: { gt: 0 },
+        // stock: { gt: 0 },
         OR: [
           { name: { contains: termoBusca, mode: 'insensitive' } },
           { description: { contains: termoBusca, mode: 'insensitive' } },
