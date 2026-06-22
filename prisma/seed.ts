@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🌱 Iniciando o Super Seed Premium - Catálogo Unificado (76 Produtos)...');
+  console.log('🌱 Iniciando o Super Seed Premium - Catálogo Unificado Absoluto...');
 
   console.log('🧹 Limpando dados antigos para evitar conflitos de chaves...');
   await prisma.orderStatusHistory.deleteMany();
@@ -61,6 +61,12 @@ async function main() {
   const catAlimentos = await prisma.category.create({
     data: { name: 'Alimentos Saudáveis', slug: 'alimentos-saudaveis' },
   });
+  const catSnacks = await prisma.category.create({
+    data: { name: 'Snacks & Barras', slug: 'snacks-barras' },
+  });
+  const catAcessorios = await prisma.category.create({
+    data: { name: 'Acessórios & Equipamentos', slug: 'acessorios-equipamentos' },
+  });
 
   // Sub-categorias / Tags de Filtro Avançado
   const tagConcentrado = await prisma.category.create({
@@ -85,12 +91,10 @@ async function main() {
   // ==========================================
   // 2. CADASTRO DE PRODUTOS
   // ==========================================
-  console.log('💊 Injetando 76 produtos com descrições e Modo de Uso...');
+  console.log('💊 Injetando produtos com descrições, links R2 e Modo de Uso...');
 
   const productsData = [
-    // ---------------------------------------------------------
-    // PRÉ-TREINOS ORIGINAIS + NOVOS
-    // ---------------------------------------------------------
+    // --- PRÉ-TREINOS ---
     {
       name: 'Max Titanium Hórus 300g - Amora',
       slug: 'max-titanium-horus-300g-amora',
@@ -163,7 +167,7 @@ async function main() {
       price: 199.9,
       stock: 100,
       description:
-        'Matriz energética limpa de alto rendimento. Com Coenzima Q10 e Citarg para otimização da respiração celular e mitigação de cãibras.\n\nModo de Uso: Diluir 15g (1 scoop e meio) em 300ml de água gelada. Consumir antes ou durante treinos de longa duração.',
+        'Matriz energética limpa de alto rendimento. Com Coenzima Q10 e Citarg para otimização da respiração celular.\n\nModo de Uso: Diluir 15g (1 scoop e meio) em 300ml de água gelada. Consumir antes ou durante treinos de longa duração.',
       imageUrl:
         'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/9a5016d5-ea3d-4bc5-b14d-22e6753cc6ac.jpg',
       catIds: [catPreTreino.id],
@@ -201,10 +205,30 @@ async function main() {
         'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/dafe10cb-1743-40a7-bb96-3a28efb0c653.jpg',
       catIds: [catPreTreino.id],
     },
+    {
+      name: 'Adaptogen Science Panic Pré-Treino 300g - Uva',
+      slug: 'adaptogen-science-panic-300g-uva',
+      price: 124.9,
+      stock: 100,
+      description:
+        'Fórmula explosiva projetada com creatina adicionada para promover força, resistência muscular e foco mental de alta intensidade.\n\nModo de Uso: Misturar 10g em 200ml de água gelada e consumir 30 minutos antes dos treinos.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2014.30.37.jpeg',
+      catIds: [catPreTreino.id, catCreatina.id],
+    },
+    {
+      name: 'Darkness Évora PW 300g - Neon Berry',
+      slug: 'darkness-evora-pw-300g-neon-berry',
+      price: 139.9,
+      stock: 100,
+      description:
+        'Edição especial do clássico Évora PW com perfil de sabor disruptivo e energia focada de liberação imediata.\n\nModo de Uso: Diluir 5g em 200ml de água fria e ingerir de 20 a 30 minutos antes da atividade física.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2014.30.59.jpeg',
+      catIds: [catPreTreino.id],
+    },
 
-    // ---------------------------------------------------------
-    // CREATINAS
-    // ---------------------------------------------------------
+    // --- CREATINAS ---
     {
       name: 'Black Skull Creatine Hardcore 150g - Sem Sabor',
       slug: 'black-skull-creatine-hardcore-150g',
@@ -326,10 +350,30 @@ async function main() {
         'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/e001e87b-14ef-4e49-ae35-dc41d88ac9c2.jpg',
       catIds: [catCreatina.id, catMaisVendidos.id, tagSemGluten.id],
     },
+    {
+      name: 'Integralmedica Creatina Hardcore (Selo Creapure) 300g',
+      slug: 'integralmedica-creatina-creapure-300g',
+      price: 169.9,
+      stock: 100,
+      description:
+        'Creatina com selo de pureza alemão Creapure, reconhecido internacionalmente por processos rígidos de filtragem.\n\nModo de Uso: Diluir 3g (1 dosador) em 200ml de água ou em conjunto com uma fonte de carboidratos.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2014.31.24.jpeg',
+      catIds: [catCreatina.id, tagSemGluten.id],
+    },
+    {
+      name: 'Max Titanium Creatina (Selo Creapure) 250g',
+      slug: 'max-titanium-creatina-creapure-250g',
+      price: 159.9,
+      stock: 100,
+      description:
+        'Pureza máxima alemã fracionada na embalagem de 250g da Max Titanium. Otimiza os treinos explosivos de força muscular.\n\nModo de Uso: Dissolver 3g do produto em copo com água ou shake proteico, misturando até homogeneizar.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2014.31.32.jpeg',
+      catIds: [catCreatina.id, tagSemGluten.id],
+    },
 
-    // ---------------------------------------------------------
-    // WHEY PROTEIN & PROTEÍNAS
-    // ---------------------------------------------------------
+    // --- WHEY PROTEIN & BLENDS ---
     {
       name: 'Olympus 3W Whey 900g - Leitinho',
       slug: 'olympus-3w-whey-900g-leitinho',
@@ -347,7 +391,7 @@ async function main() {
       price: 145.0,
       stock: 100,
       description:
-        '100% Whey Protein Concentrado Gourmet. Alta cremosidade com sabor idêntico ao clássico pudim de leite.\n\nModo de Uso: Bater 30g do produto com 150ml de água ou leite gelado. Ideal para shakes proteicos e receitas fit.',
+        '100% Whey Protein Concentrado Gourmet. Alta cremosidade com sabor idêntico ao clássico pudim de leite.\n\nModo de Uso: Bater 30g do produto com 150ml de água ou leite gelado. Ideal para shakes proteicos.',
       imageUrl:
         'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/products/40a37c9d-1294-41dd-93fd-43f4209a9f74.jpg',
       catIds: [catWhey.id, tagConcentrado.id],
@@ -446,7 +490,7 @@ async function main() {
       price: 99.9,
       stock: 30,
       description:
-        'Suplemento proteico econômico de alto valor para dietas hipercalóricas ou de manutenção de tecidos musculares.\n\nModo de Uso: Bater 40g em 200ml de leite ou água no liquidificador após os treinos.',
+        'Suplemento proteico econômico de alto valor para dietas de manutenção ou hipertrofia muscular.\n\nModo de Uso: Bater 40g em 200ml de leite ou água no liquidificador após os treinos.',
       imageUrl:
         'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/45be7c14-48e3-4cee-9cf1-829fda0a5a4d.jpg',
       catIds: [catWhey.id, tagConcentrado.id],
@@ -517,10 +561,41 @@ async function main() {
         'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/e42f3362-28a9-4aef-856c-b493df44cd8c.jpg',
       catIds: [catWhey.id, tagIsolado.id, tagZeroLactose.id, tagSemGluten.id],
     },
+    {
+      name: 'Adaptogen Science Tasty Whey 900g - Chocomaltine',
+      slug: 'adaptogen-tasty-whey-chocomaltine',
+      price: 159.9,
+      stock: 100,
+      description:
+        'Fórmula ultra cremosa de Whey Protein com flocos crocantes de malte e sabor acentuado Chocomaltine de alta absorção.\n\nModo de Uso: Dissolver 30g (1 dosador) em 200ml de água fria logo após os treinos.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.10.05.jpeg',
+      catIds: [catWhey.id, tagConcentrado.id],
+    },
+    {
+      name: 'Under Labz Protein Crush 900g - Chocotine',
+      slug: 'under-labz-protein-crush-chocotine',
+      price: 164.9,
+      stock: 100,
+      description:
+        'Proteína isolada e concentrada de fluxo cruzado com complexo antioxidante e sabor especial cremoso Chocotine.\n\nModo de Uso: Adicionar 35g em 200ml de água ou bebida vegetal de preferência pós-treino.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.10.36.jpeg',
+      catIds: [catWhey.id, tagConcentrado.id],
+    },
+    {
+      name: 'Under Labz Iso Hydro Whey Crush 907g - Milk Cream',
+      slug: 'under-labz-iso-hydro-milk-cream',
+      price: 249.9,
+      stock: 100,
+      description:
+        'Matriz premium 100% isolada e hidrolisada para velocidade máxima de absorção miofibrilar. Sabor Milk Cream.\n\nModo de Uso: Misturar 1 scoop (31g) em 180ml de água fria imediatamente após o término do exercício.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.10.52.jpeg',
+      catIds: [catWhey.id, tagIsolado.id, tagHidrolisado.id, tagZeroLactose.id],
+    },
 
-    // ---------------------------------------------------------
-    // PROTEÍNAS DA CARNE E OVO
-    // ---------------------------------------------------------
+    // --- PROTEÍNAS DA CARNE E OVO ---
     {
       name: 'Darkness Carnibol 900g - Blueberry',
       slug: 'darkness-carnibol-900g-blueberry',
@@ -549,15 +624,24 @@ async function main() {
       price: 69.9,
       stock: 85,
       description:
-        'Albumina premium purificada obtida da clara do ovo pasteurizada. Absorção gradual e prolongada (Time-Release).\n\nModo de Uso: Misturar 2 colheres de sopa (28g) em 200ml de água ou shake antes de dormir ou entre refeições.',
+        'Albumina premium purificada obtida da clara do ovo pasteurizada. Absorção gradual e prolongada (Time-Release).\n\nModo de Uso: Misturar 2 colheres de sopa (28g) em 200ml de água ou shake antes de dormir.',
       imageUrl:
         'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/6755d15b-bfa9-41b2-b87e-33528c2997c6.jpg',
       catIds: [catOvo.id, tagZeroLactose.id, tagSemGluten.id],
     },
+    {
+      name: 'Naturovovs Albumina Natural 420g',
+      slug: 'naturovovs-albumina-natural-420g',
+      price: 64.9,
+      stock: 100,
+      description:
+        'Clara de ovo desidratada 100% pura, sem sabor, aromatizantes ou aditivos alimentares. Fonte de alta digestibilidade protéica.\n\nModo de Uso: Misturar 2 colheres de sopa em 200ml de água ou suco no desjejum ou antes de deitar.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.09.48.jpeg',
+      catIds: [catOvo.id, tagZeroLactose.id, tagSemGluten.id],
+    },
 
-    // ---------------------------------------------------------
-    // EMAGRECIMENTO & TERMOGÊNICOS
-    // ---------------------------------------------------------
+    // --- EMAGRECIMENTO & TERMOGÊNICOS ---
     {
       name: 'Health Cyde Trinka Abdômen Extreme Thermogenic 60 Caps',
       slug: 'health-cyde-trinka-abdomen-60-caps',
@@ -597,7 +681,7 @@ async function main() {
       price: 139.9,
       stock: 40,
       description:
-        'Fórmula termogênica agressiva com Ioimbina HCL para mobilização de gordura em áreas de difícil queima.\n\nModo de Uso: Tomar 1 cápsula ao dia pela manhã em jejum ou antes do treino conforme tolerância individual.',
+        'Fórmula termogênica agressiva com Ioimbina HCL para mobilização de gordura em áreas de difícil queima.\n\nModo de Uso: Tomar 1 cápsula ao dia pela manhã em jejum ou antes do treino.',
       imageUrl:
         'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/6d1e0c68-3365-4a06-ba00-ed755e5c9ab9.jpg',
       catIds: [catTermo.id, catEmagrecimento.id],
@@ -608,7 +692,7 @@ async function main() {
       price: 159.9,
       stock: 35,
       description:
-        'Queimador de gordura livre de estimulantes (Cafeína Free). Perfeito para uso noturno ou indivíduos sensíveis.\n\nModo de Uso: Ingerir 2 cápsulas ao dia, preferencialmente antes do treino noturno ou janta.',
+        'Queimador de gordura livre de estimulantes (Cafeína Free). Perfeito para uso noturno ou indivíduos sensíveis.\n\nModo de Uso: Ingerir 2 cápsulas ao dia, preferencialmente antes do treino noturno.',
       imageUrl:
         'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/882b237f-4db8-464d-abad-03226f6ec664.jpg',
       catIds: [catTermo.id, catEmagrecimento.id, tagSemCafeina.id],
@@ -619,7 +703,7 @@ async function main() {
       price: 159.9,
       stock: 30,
       description:
-        'Termogênico ultra potente de ação lipolítica profunda e liberação sustentada de foco.\n\nModo de Uso: Tomar 2 cápsulas ao dia (1 pela manhã e 1 antes do almoço), não excedendo a dose recomendada.',
+        'Termogênico ultra potente de ação lipolítica profunda e liberação sustentada de foco.\n\nModo de Uso: Tomar 2 cápsulas ao dia (1 pela manhã e 1 antes do almoço), não excedendo a dose.',
       imageUrl:
         'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/4905cc59-e5dc-4873-a3fa-51a5f11e79a6.jpg',
       catIds: [catTermo.id, catEmagrecimento.id],
@@ -641,15 +725,24 @@ async function main() {
       price: 59.9,
       stock: 80,
       description:
-        'Fórmula diurética de ação rápida. Elimina a retenção hídrica subcutânea para máxima definição muscular.\n\nModo de Uso: Ingerir 1 comprimido ao dia pela manhã, acompanhado de abundante ingestão de água ao longo do dia.',
+        'Fórmula diurética de ação rápida. Elimina a retenção hídrica subcutânea para máxima definição muscular.\n\nModo de Uso: Ingerir 1 comprimido ao dia pela manhã, acompanhado de abundante ingestão de água.',
       imageUrl:
         'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/daa420fa-16b5-4f1c-981e-70f0283f15fb.jpg',
       catIds: [catEmagrecimento.id],
     },
+    {
+      name: 'Under Labz Clembuter (Líquido Oral) 250ml',
+      slug: 'under-labz-clembuter-250ml',
+      price: 149.9,
+      stock: 100,
+      description:
+        'Termogênico líquido de ação periférica focado em queima calórica massiva e definição estética rigorosa. Sabor Red Fruits.\n\nModo de Uso: Ingerir 5ml pela manhã em jejum ou 30 minutos antes do treino de endurance.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2014.31.10.jpeg',
+      catIds: [catTermo.id, catEmagrecimento.id],
+    },
 
-    // ---------------------------------------------------------
-    // LOTE DE NOVOS PRODUTOS: ÔMEGAS, FITOTERÁPICOS E SAÚDE
-    // ---------------------------------------------------------
+    // --- ÔMEGAS, AMINOÁCIDOS E VITAMINAS ---
     {
       name: 'Aqualiv (Grupo Althaia) Ômega 3 1.000mg',
       slug: 'aqualiv-omega-3-1000mg-120-caps',
@@ -766,7 +859,7 @@ async function main() {
       price: 149.9,
       stock: 45,
       description:
-        'Fórmula avançada sinérgica contendo Tribulus enriquecido com Maca Peruana preta para máxima modulação hormonal.\n\nModo de Uso: Consumir 2 cápsulas diariamente, preferencialmente 1 hora antes do treinamento físico.',
+        'Fórmula avançada sinérgica contendo Tribulus enriched com Maca Peruana para máxima modulação hormonal.\n\nModo de Uso: Consumir 2 cápsulas diariamente, preferencialmente 1 hora antes do treinamento físico.',
       imageUrl:
         'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-08%20at%2012.43.50.jpeg',
       catIds: [catFitoHormonal.id, catMaisVendidos.id],
@@ -832,7 +925,7 @@ async function main() {
       price: 99.9,
       stock: 60,
       description:
-        'N-Acetil L-Cisteína (670mg). Precursor direto da glutatião, o antioxidante mais potente do corpo humano. Proteção hepática e pulmonar.\n\nModo de Uso: Tomar 1 cápsula ao dia longe das refeições ou conforme orientação nutricional.',
+        'N-Acetil L-Cisteína (670mg). Precursor direto da glutatião, o antioxidante mais potente do corpo humano. Proteção hepática.\n\nModo de Uso: Tomar 1 cápsula ao dia longe das refeições ou conforme orientação nutricional.',
       imageUrl:
         'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-08%20at%2012.45.19.jpeg',
       catIds: [catSaudeVitaminas.id, catAminoacidos.id],
@@ -882,70 +975,525 @@ async function main() {
       catIds: [catSaudeVitaminas.id],
     },
     {
-      name: 'Under Labz Beta-Alanine 100% Pure 300g',
-      slug: 'under-labz-beta-alanine-300g',
-      price: 119.9,
-      stock: 80,
+      name: 'Black Skull Beta-Alanine Betapure 100g',
+      slug: 'black-skull-beta-alanine-betapure-100g',
+      price: 59.9,
+      stock: 100,
       description:
-        'Beta-Alanina pura monohidratada. Atua elevando os níveis de carnosina muscular para mitigar a acidose e fadiga.\n\nModo de Uso: Diluir 2g (meio dosador) em 200ml de água, fracionando o consumo em doses de 40ml ao longo do dia.',
+        'Beta-Alanina pura com tecnologia Betapure de filtragem. Minimiza a queimação muscular gerada pela acidose no treino lático.\n\nModo de Uso: Consumir doses fracionadas de 2g ao dia diluídas em 150ml de água.',
       imageUrl:
-        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-08%20at%2012.46.24.jpeg',
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2014.30.09.jpeg',
       catIds: [catAminoacidos.id],
     },
     {
-      name: 'Under Labz Glutamine 100% Pure 300g',
-      slug: 'under-labz-glutamine-300g',
-      price: 99.9,
-      stock: 75,
+      name: "Nutrition'all Morning All 300g - Limão",
+      slug: 'nutritionall-morning-all-300g-limao',
+      price: 109.9,
+      stock: 100,
       description:
-        'L-Glutamina isolada de alto valor biológico. Essencial para a integridade dos enterócitos (barreira intestinal) e imunidade.\n\nModo de Uso: Diluir 5g (1 dosador) em 100ml de água ou suco. Consumir pela manhã em jejum ou pós-treino.',
+        'Fórmula matinal imunomoduladora com base concentrada de L-Glutamina pura, Vitamina C e Extrato de Própolis verde.\n\nModo de Uso: Diluir 10g (1 colher medida) em 150ml de água morna ou gelada pela manhã em jejum.',
       imageUrl:
-        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-08%20at%2012.48.00.jpeg',
-      catIds: [catAminoacidos.id],
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.05.46.jpeg',
+      catIds: [catSaudeVitaminas.id, catAminoacidos.id],
     },
     {
-      name: 'Vitafor Glutamax L-Glutamina Alta Pureza 300g',
-      slug: 'vitafor-glutamax-300g',
-      price: 129.9,
-      stock: 90,
+      name: 'Body Action Colágeno Hidrolisado Verisol 200g',
+      slug: 'body-action-colageno-verisol-200g',
+      price: 94.9,
+      stock: 100,
       description:
-        'Glutamina com certificação internacional de pureza. Aminoácido isolado de solubilidade total e sem sabor.\n\nModo de Uso: Dissolver 5g em 150ml de água mineral líquida e consumir em jejum ou conforme indicação clínica.',
+        'Peptídeos de colágeno Verisol avançados adicionados de ácido hialurônico e biotina para firmeza celular dérmica.\n\nModo de Uso: Dissolver 10g em 200ml de água ou suco natural uma vez ao dia.',
       imageUrl:
-        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-08%20at%2012.48.12.jpeg',
-      catIds: [catAminoacidos.id, catMaisVendidos.id],
-    },
-    {
-      name: 'Belissima Collagen+ Verisol 264g - Laranja + Acerola',
-      slug: 'belissima-collagen-verisol-264g',
-      price: 159.9,
-      stock: 40,
-      description:
-        'Peptídeos bioativos de colágeno Verisol enriquecidos com ácido hialurônico, biotina e minerais para regeneração dérmica e capilar.\n\nModo de Uso: Misturar 8.8g (1 colher de sopa) em 200ml de água pela manhã ou à noite antes de deitar.',
-      imageUrl:
-        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-08%20at%2012.48.27.jpeg',
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.06.16.jpeg',
       catIds: [catSaudeVitaminas.id],
     },
+
+    // --- SNACKS & ALIMENTOS ---
     {
-      name: 'Dr. Peanut Pasta de Amendoim Bueníssimo 600g',
-      slug: 'dr-peanut-buenissimo-600g',
-      price: 39.9,
+      name: 'Bendu Cookie Proteico 40g - Baunilha',
+      slug: 'bendu-cookie-proteico-40g-baunilha',
+      price: 9.9,
       stock: 200,
       description:
-        'Pasta de amendoim gourmet com zero adição de açúcares, saborizada com avelã, chocolate e pedaços de wafer crocante.\n\nModo de Uso: Consumir de 1 a 2 colheres de sopa ao dia como aporte de gorduras boas ou pré-treino calórico.',
+        'Cookie fit hiperproteico sabor baunilha com gotas de chocolate. Zero açúcar, glúten ou aditivos químicos.\n\nModo de Uso: Consumir como um lanche intermediário saudável ou pré-treino rápido.',
       imageUrl:
-        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-08%20at%2012.49.21.jpeg',
-      catIds: [catAlimentos.id, catMaisVendidos.id, tagSemGluten.id],
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.06.54.jpeg',
+      catIds: [catSnacks.id, tagSemGluten.id, tagZeroLactose.id],
     },
     {
-      name: 'Body Action Energel Black Caixa (10 Sachês de 30g)',
-      slug: 'body-action-energel-black-caixa',
-      price: 45.0,
+      name: 'Adaptogen Snacks Easy Wafer 50g - Cookies & Cream',
+      slug: 'adaptogen-easy-wafer-cookies-cream',
+      price: 11.9,
       stock: 150,
       description:
-        'Gel de carboidratos sequenciais (Maltodextrina, Frutose e Palatinose) com Cafeína e D-Ribose para reposição instantânea de glicogênio.\n\nModo de Uso: Consumir 1 sachê de 30g a cada 30-45 minutos de exercícios de endurance intensos.',
+        'Wafer proteico crocante recheado com creme de baunilha e cobertura sabor chocolate e pedaços de biscoito.\n\nModo de Uso: Pronto para consumo a qualquer hora do dia ou lanche proteico.',
       imageUrl:
-        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-08%20at%2012.50.08.jpeg',
-      catIds: [catAlimentos.id],
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.07.11.jpeg',
+      catIds: [catSnacks.id],
+    },
+    {
+      name: 'Bendu Soft Bar 50g - Chocolate',
+      slug: 'bendu-soft-bar-50g-chocolate',
+      price: 12.9,
+      stock: 200,
+      description:
+        'Barra de proteína de textura extremamente macia, sem lactose e sem adição de açúcares comerciais. Rico em fibras.\n\nModo de Uso: Pronto para consumo imediato nos lanches estruturais intermediários.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.07.26.jpeg',
+      catIds: [catSnacks.id, tagZeroLactose.id, tagSemGluten.id],
+    },
+    {
+      name: 'Max Titanium Power Protein Crisp - Banoffee',
+      slug: 'max-titanium-protein-crisp-banoffee',
+      price: 13.9,
+      stock: 180,
+      description:
+        'Barra hiperproteica estruturada com recheio cremoso sabor banana e caramelo salgado (Banoffee) com crispies.\n\nModo de Uso: Consumir após os treinos como aporte proteico ou sobremesa fit intermediária.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.07.50.jpeg',
+      catIds: [catSnacks.id],
+    },
+    {
+      name: 'Body Action Energel Outdoors 30g - Morango',
+      slug: 'body-action-energel-outdoors-morango',
+      price: 4.9,
+      stock: 300,
+      description:
+        'Sachê individual de gel energético de carboidratos com minerais para reposição hidroeletrolítica durante treinos longos.\n\nModo de Uso: Consumir 1 sachê 10 minutos antes da atividade e a cada 30-45 minutos de exercício intenso.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.08.42.jpeg',
+      catIds: [catSnacks.id, catAlimentos.id],
+    },
+    {
+      name: 'Body Action Energel Black 30g - Uva',
+      slug: 'body-action-energel-black-uva-sache',
+      price: 5.5,
+      stock: 300,
+      description:
+        'Sachê concentrado de carboidratos complexos de rápida oxidação energética associado a Cafeína Anidra.\n\nModo de Uso: Tomar 1 sachê com água durante treinos pesados de ciclismo, corrida ou endurance físico.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.09.11.jpeg',
+      catIds: [catSnacks.id, catAlimentos.id],
+    },
+    {
+      name: 'Bendu Crispy Wafer 40g - Pistache',
+      slug: 'bendu-crispy-wafer-40g-pistache',
+      price: 10.9,
+      stock: 150,
+      description:
+        'Wafer hiperproteico crocante recheado com creme integral de pistache puro. Isento de açúcar refinado e glúten.\n\nModo de Uso: Consumir a qualquer momento do dia como um snack proteico saudável.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.09.26.jpeg',
+      catIds: [catSnacks.id, tagSemGluten.id, tagZeroLactose.id],
+    },
+
+    // --- ACESSÓRIOS & EQUIPAMENTOS ---
+    {
+      name: 'Hidrolight Luva de Neoprene - Tamanho P',
+      slug: 'hidrolight-luva-neoprene-p',
+      price: 49.9,
+      stock: 50,
+      description:
+        'Luva esportiva em neoprene de alta resistência protetora contra calosidades e atritos palmares durante treinos pesados.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.11.37.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Luva de Neoprene - Tamanho M',
+      slug: 'hidrolight-luva-neoprene-m',
+      price: 49.9,
+      stock: 50,
+      description:
+        'Luva esportiva em neoprene de alta resistência protetora contra calosidades e atritos palmares durante treinos pesados.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.11.37.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Luva de Neoprene - Tamanho G',
+      slug: 'hidrolight-luva-neoprene-g',
+      price: 49.9,
+      stock: 50,
+      description:
+        'Luva esportiva em neoprene de alta resistência protetora contra calosidades e atritos palmares durante treinos pesados.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.11.37.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Faixa Elástica Forte 150x15cm',
+      slug: 'hidrolight-faixa-elastica-forte',
+      price: 39.9,
+      stock: 80,
+      description:
+        'Banda elástica de alta tensão para exercícios de reabilitação, fisioterapia, alongamentos profundos e treinos de perna.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.12.32.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Faixa Elástica Suave 150x15cm',
+      slug: 'hidrolight-faixa-elastica-suave',
+      price: 34.9,
+      stock: 80,
+      description:
+        'Banda elástica de leve intensidade recomendada para treinos de mobilidade articular e alongamentos progressivos.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.12.39.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Mini Band Kit 3 Peças',
+      slug: 'hidrolight-mini-band-kit-3',
+      price: 45.0,
+      stock: 100,
+      description:
+        'Conjunto de 3 elásticos circulares de diferentes intensidades (Leve, Médio, Forte) para ativação do glúteo e estabilização de quadril.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.12.46.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Mini Band Kit 5 Peças',
+      slug: 'hidrolight-mini-band-kit-5',
+      price: 59.9,
+      stock: 100,
+      description:
+        'Kit estendido de 5 faixas elásticas circulares graduais variando da ultra leve à ultra forte para evolução de carga.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.12.54.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Faixa para Alongamento',
+      slug: 'hidrolight-faixa-alongamento',
+      price: 29.9,
+      stock: 70,
+      description:
+        'Cinta em tecido rígido com múltiplos loops de empunhadura estática facilitadora para flexibilidade muscular geral.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.13.14.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Protetor Palmar - Tamanho P',
+      slug: 'hidrolight-protetor-palmar-p',
+      price: 34.9,
+      stock: 60,
+      description:
+        'Grip simples de proteção anatômica antiderrapante para palmas das mãos, evitando lesões em puxadas.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.13.46.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Protetor Palmar - Tamanho M',
+      slug: 'hidrolight-protetor-palmar-m',
+      price: 34.9,
+      stock: 60,
+      description:
+        'Grip simples de proteção anatômica antiderrapante para palmas das mãos, evitando lesões em puxadas.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.13.46.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Protetor Palmar - Tamanho G',
+      slug: 'hidrolight-protetor-palmar-g',
+      price: 34.9,
+      stock: 60,
+      description:
+        'Grip simples de proteção anatômica antiderrapante para palmas das mãos, evitando lesões em puxadas.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.13.46.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Strap Maxi',
+      slug: 'hidrolight-strap-maxi',
+      price: 39.9,
+      stock: 90,
+      description:
+        'Fitas de punho estendidas de alta tração mecânica auxiliadoras na redução de fadiga de pegada em Deadlifts.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.13.57.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Cotoveleira Ortopédica - Tamanho PP',
+      slug: 'hidrolight-cotoveleira-pp',
+      price: 44.9,
+      stock: 40,
+      description:
+        'Suporte elástico de compressão bilateral focado na contenção articular e alívio de tendinites mecânicas.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.14.03.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Cotoveleira Ortopédica - Tamanho P',
+      slug: 'hidrolight-cotoveleira-p',
+      price: 44.9,
+      stock: 40,
+      description:
+        'Suporte elástico de compressão bilateral focado na contenção articular e alívio de tendinites mecânicas.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.14.03.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Cotoveleira Ortopédica - Tamanho M',
+      slug: 'hidrolight-cotoveleira-m',
+      price: 44.9,
+      stock: 40,
+      description:
+        'Suporte elástico de compressão bilateral focado na contenção articular e alívio de tendinites mecânicas.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.14.03.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Cotoveleira Ortopédica - Tamanho G',
+      slug: 'hidrolight-cotoveleira-g',
+      price: 44.9,
+      stock: 40,
+      description:
+        'Suporte elástico de compressão bilateral focado na contenção articular e alívio de tendinites mecânicas.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.14.03.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Cotoveleira Ortopédica - Tamanho GG',
+      slug: 'hidrolight-cotoveleira-gg',
+      price: 44.9,
+      stock: 40,
+      description:
+        'Suporte elástico de compressão bilateral focado na contenção articular e alívio de tendinites mecânicas.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.14.03.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Faixa Elástica Extra Forte 150x15cm',
+      slug: 'hidrolight-faixa-elastica-extra-forte',
+      price: 44.9,
+      stock: 60,
+      description:
+        'Elástico de máxima resistência molecular para treinos avançados de força muscular e estabilização corporal ativa.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.14.15.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Luva Neoprene com Alça - Tamanho P',
+      slug: 'hidrolight-luva-alca-p',
+      price: 54.9,
+      stock: 50,
+      description:
+        'Luva premium em neoprene anatômico adicionada de alça ajustadora de velcro reforçada nos punhos.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.14.38.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Luva Neoprene com Alça - Tamanho M',
+      slug: 'hidrolight-luva-alca-m',
+      price: 54.9,
+      stock: 50,
+      description:
+        'Luva premium em neoprene anatômico adicionada de alça ajustadora de velcro reforçada nos punhos.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.14.38.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Luva Neoprene com Alça - Tamanho G',
+      slug: 'hidrolight-luva-alca-g',
+      price: 54.9,
+      stock: 50,
+      description:
+        'Luva premium em neoprene anatômico adicionada de alça ajustadora de velcro reforçada nos punhos.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.14.38.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'NC Extreme Luva Caleira Profissional (1 Par)',
+      slug: 'nc-extreme-luva-caleira',
+      price: 39.9,
+      stock: 120,
+      description:
+        'Luva caleira minimalista antiderrapante desenvolvida especialmente para treinos intensos de crossfit e musculação pesada.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.15.40.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'NC Extreme Thin Strap Musculação (1 Par)',
+      slug: 'nc-extreme-thin-strap',
+      price: 34.9,
+      stock: 100,
+      description:
+        'Straps finos de tecido ultra-reforçado que auxiliam no isolamento da musculatura dorsal durante puxadas pesadas.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.15.58.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Fiber Octo Maxgrip para Treino',
+      slug: 'fiber-octo-maxgrip-treino',
+      price: 79.9,
+      stock: 150,
+      description:
+        'Grip palmar de formato anatômico emborrachado focado na aderência absoluta em barras e argolas olímpicas.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.16.08.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Strap Basic (Tamanho Único)',
+      slug: 'hidrolight-strap-basic-unico',
+      price: 24.9,
+      stock: 150,
+      description:
+        'Acessório clássico em fita de algodão grosso para estabilização de pegada e suporte mecânico de carga.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.16.23.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Kit 5 Peças Faixas Elásticas com Pegadores',
+      slug: 'hidrolight-kit-5-faixas-pegadores',
+      price: 119.9,
+      stock: 45,
+      description:
+        'Sistema modular elástico tubular acompanhado de par de pegadores, âncora de porta e tornozeleiras para treino funcional completo.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.16.38.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Barra de Exercícios Porta',
+      slug: 'hidrolight-barra-exercicios-porta',
+      price: 89.9,
+      stock: 35,
+      description:
+        'Barra extensível ajustável para batentes de porta, com revestimento macio em espuma antiderrapante.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.17.25.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Kit 15 Peças Cone Chapéu Chinês',
+      slug: 'hidrolight-kit-15-chapeu-chines',
+      price: 49.9,
+      stock: 60,
+      description:
+        'Conjunto de 15 mini cones semi-flexíveis marcadores de solo para circuitos funcionais e treinos de agilidade.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.17.58.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Cinta Modeladora Ortopédica - Tamanho PP',
+      slug: 'hidrolight-cinta-modeladora-pp',
+      price: 79.9,
+      stock: 50,
+      description:
+        'Cinta em neoprene compressivo de alta estabilização lombar e suporte postural abdominal durante atividades diárias ou treinos.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.19.43.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Cinta Modeladora Ortopédica - Tamanho P',
+      slug: 'hidrolight-cinta-modeladora-p',
+      price: 79.9,
+      stock: 50,
+      description:
+        'Cinta em neoprene compressivo de alta estabilização lombar e suporte postural abdominal durante atividades diárias ou treinos.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.19.43.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Cinta Modeladora Ortopédica - Tamanho M',
+      slug: 'hidrolight-cinta-modeladora-m',
+      price: 79.9,
+      stock: 50,
+      description:
+        'Cinta em neoprene compressivo de alta estabilização lombar e suporte postural abdominal durante atividades diárias ou treinos.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.19.43.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Cinta Modeladora Ortopédica - Tamanho G',
+      slug: 'hidrolight-cinta-modeladora-g',
+      price: 79.9,
+      stock: 50,
+      description:
+        'Cinta em neoprene compressivo de alta estabilização lombar e suporte postural abdominal durante atividades diárias ou treinos.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.19.43.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Cinta Modeladora Ortopédica - Tamanho GG',
+      slug: 'hidrolight-cinta-modeladora-gg',
+      price: 79.9,
+      stock: 50,
+      description:
+        'Cinta em neoprene compressivo de alta estabilização lombar e suporte postural abdominal durante atividades diárias ou treinos.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.19.43.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Fiber Sapatilha Training Barefoot',
+      slug: 'fiber-sapatilha-training-barefoot',
+      price: 149.9,
+      stock: 80,
+      description:
+        'Calçado minimalista em malha anatômica respirável focado no conceito barefoot para ganho de equilíbrio e força proprioceptiva.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.20.31.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Fiber Fly Ultra Elastic Sock',
+      slug: 'fiber-fly-ultra-elastic-sock',
+      price: 89.9,
+      stock: 100,
+      description:
+        'Meia calçado de compressão elástica moldável desenvolvida para treinos dinâmicos de agilidade em estúdio ou yoga.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.20.59.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Fiber Fly Recovery Orthotic Compression',
+      slug: 'fiber-fly-recovery-compression',
+      price: 99.9,
+      stock: 100,
+      description:
+        'Sistema têxtil tecnológico de compressão graduada focado no aumento de retorno venoso e aceleração da recuperação elástica.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.21.18.jpeg',
+      catIds: [catAcessorios.id],
+    },
+    {
+      name: 'Hidrolight Cinturão de Exercícios 90 x 15 cm',
+      slug: 'hidrolight-cinturao-exercicios-90x15',
+      price: 69.9,
+      stock: 75,
+      description:
+        'Cinturão de musculação em EVA semi-rígido protetor de parede abdominal contra picos de pressão intra-torácica.',
+      imageUrl:
+        'https://pub-bafc1d447702426098685b6529ea4e5b.r2.dev/WhatsApp%20Image%202026-06-11%20at%2015.20.07.jpeg',
+      catIds: [catAcessorios.id],
     },
   ];
 
@@ -968,7 +1516,7 @@ async function main() {
   }
 
   console.log(
-    `✅ Seed finalizado com sucesso! Todos os 76 produtos foram estruturados com Modo de Uso.`,
+    `✅ Seed finalizado com sucesso! O banco populado com todas as categorias e acessórios.`,
   );
 }
 
