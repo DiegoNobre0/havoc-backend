@@ -1,11 +1,15 @@
 import { prisma } from '../../../database/prisma.js';
 import { redis } from '../../../shared/redis/redis.js';
 import crypto from 'crypto';
+import { imageScraperQueue } from '../../../shared/worker/image-scraper.worker.js';
+import { IAService } from '../../../integrations/IA/IA.service.js';
+import { PDFParse } from 'pdf-parse';
+import { pdfImportItemSchema } from '../catalog.schemas.js';
 
 export class ProductService {
   private CACHE_PREFIX = 'catalog:products:';
+  private iaService = new IAService();
 
-  // Helper para invalidar o cache sempre que houver alteração (POST, PUT, DELETE)
   private async clearCache() {
     const keys = await redis.keys(`${this.CACHE_PREFIX}*`);
     if (keys.length > 0) await redis.del(keys);
@@ -27,7 +31,6 @@ export class ProductService {
 
     if (search) where.name = { contains: search, mode: 'insensitive' };
 
-    // 👉 Busca produtos que tenham ALGUMA categoria com este ID
     if (categoryId) {
       where.categories = { some: { id: categoryId } };
     }
@@ -40,7 +43,7 @@ export class ProductService {
         where,
         skip,
         take: limit,
-        include: { categories: { select: { id: true, name: true } } }, // 👉 Retorna um Array agora
+        include: { categories: { select: { id: true, name: true } } },
         orderBy: { createdAt: 'desc' },
       }),
     ]);
@@ -57,12 +60,10 @@ export class ProductService {
   async create(data: any) {
     const { categoryIds, ...rest } = data;
 
-    // 1. Verifica se o slug já existe
     const existingProduct = await prisma.product.findUnique({
       where: { slug: rest.slug },
     });
 
-    // 2. Se o slug existir, adiciona um hash curto para torná-lo único
     if (existingProduct) {
       const hash = crypto.randomBytes(3).toString('hex');
       rest.slug = `${rest.slug}-${hash}`;
@@ -87,7 +88,6 @@ export class ProductService {
       where: { id },
       data: {
         ...rest,
-        // O "set" limpa as relações antigas e cria as novas
         categories: categoryIds ? { set: categoryIds.map((id: string) => ({ id })) } : undefined,
       },
     });
@@ -99,7 +99,7 @@ export class ProductService {
     const product = await prisma.product.update({
       where: { id },
       data: { isActive },
-      select: { id: true, isActive: true }, // Retorna só o necessário
+      select: { id: true, isActive: true },
     });
     await this.clearCache();
     return product;
@@ -112,5 +112,127 @@ export class ProductService {
     });
     await this.clearCache();
     return product;
+  }
+
+  async importFromPDF(pdfBuffer: Buffer) {
+    const parser = new PDFParse({ data: pdfBuffer });
+    const pdfData = await parser.getText();
+    await parser.destroy();
+    const rawText = pdfData.text;
+
+    const extractedProducts = await this.iaService.extractProductsFromPDF(rawText);
+
+    const relatorio = {
+      criados: 0,
+      atualizados: 0,
+      erros: 0,
+      detalhesErros: [] as { item: unknown; motivo: string }[],
+    };
+
+    for (const rawItem of extractedProducts) {
+      const parsed = pdfImportItemSchema.safeParse(rawItem);
+
+      if (!parsed.success) {
+        relatorio.erros++;
+        relatorio.detalhesErros.push({
+          item: rawItem,
+          motivo: parsed.error.issues.map((i) => i.message).join('; '),
+        });
+        console.error(`Item inválido vindo da IA:`, rawItem, parsed.error.issues);
+        continue;
+      }
+
+      const item = parsed.data;
+
+      try {
+        const slug = item.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/(^-|-$)+/g, '');
+
+        // 🧠 MÁGICA DE MÚLTIPLAS CATEGORIAS: Busca ou cria todas as categorias/tags
+        const categoryConnectIds: { id: string }[] = [];
+
+        if (item.categories && item.categories.length > 0) {
+          for (const catName of item.categories) {
+            const cleanName = catName.trim();
+
+            // Procura a categoria no banco
+            let category = await prisma.category.findFirst({
+              where: { name: { equals: cleanName, mode: 'insensitive' } },
+            });
+
+            // Se a IA inventou uma categoria/tag nova, a gente cria!
+            if (!category) {
+              category = await prisma.category.create({
+                data: {
+                  name: cleanName,
+                  slug: cleanName
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, '-')
+                    .replace(/(^-|-$)+/g, ''),
+                  isActive: true,
+                },
+              });
+            }
+            // Guarda o ID para conectar no produto depois
+            categoryConnectIds.push({ id: category.id });
+          }
+        }
+
+        const existingProduct = await prisma.product.findFirst({
+          where: {
+            OR: [{ slug: slug }, { name: { equals: item.name, mode: 'insensitive' } }],
+          },
+        });
+
+        if (existingProduct) {
+          // ATUALIZA PRODUTO EXISTENTE
+          await prisma.product.update({
+            where: { id: existingProduct.id },
+            data: {
+              stock: item.stock,
+              price: item.price,
+              description: item.description || null, // 👈 Força null se vier undefined
+              ...(item.cost !== undefined && { cost_price: item.cost }),
+              ...(categoryConnectIds.length > 0 && { categories: { set: categoryConnectIds } }),
+              updatedAt: new Date(),
+            },
+          });
+          relatorio.atualizados++;
+        } else {
+          // CRIA PRODUTO NOVO
+          const newProduct = await prisma.product.create({
+            data: {
+              name: item.name,
+              slug: slug,
+              price: item.price,
+              description: item.description || null, // 👈 Força null se vier undefined
+              ...(item.cost !== undefined && { cost_price: item.cost }),
+              stock: item.stock,
+              isActive: true,
+              ...(categoryConnectIds.length > 0 && { categories: { connect: categoryConnectIds } }),
+            },
+          });
+          relatorio.criados++;
+
+          // Manda pro caçador de imagens
+          await imageScraperQueue.add('scrape-image', {
+            productId: newProduct.id,
+            productName: newProduct.name,
+          });
+        }
+      } catch (err) {
+        console.error(`Erro ao importar ${item.name}:`, err);
+        relatorio.erros++;
+        relatorio.detalhesErros.push({
+          item,
+          motivo: err instanceof Error ? err.message : 'Erro desconhecido ao gravar no banco',
+        });
+      }
+    }
+
+    await this.clearCache();
+    return relatorio;
   }
 }

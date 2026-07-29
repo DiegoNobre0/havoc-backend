@@ -113,19 +113,25 @@ model Category {
 }
 
 model Product {
-  id          String    @id @default(uuid())
-  name        String
-  slug        String    @unique
-  description String?
-  price       Decimal   @db.Decimal(10, 2)
-  stock       Int       @default(0)
-  sku         String?   @unique
-  imageUrl    String?
-  imageKey    String? // S3 key para deleção
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
+  id            String    @id @default(uuid())
+  name          String
+  slug          String    @unique
+  description   String?
+  unit          String    @default("UN")
+  price         Decimal   @db.Decimal(10, 2)
+  cost_price    Decimal?  @db.Decimal(10, 2)
+  price_wholesale Decimal? @db.Decimal(10, 2)
+  stock         Int       @default(0)
+  stock_min     Int       @default(0)
+  ncm           String?
+  cfop          String?
+  sku           String?   @unique
+  imageUrl      String?
+  imageKey      String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
 
   categories Category[]
 
@@ -137,7 +143,6 @@ model Product {
   @@index([isActive])
   @@map("products")
 }
-
 model Kit {
   id            String    @id @default(uuid())
   name          String

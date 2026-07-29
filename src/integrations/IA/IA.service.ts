@@ -185,6 +185,97 @@ export class IAService {
     return { result, handoff, extractedTags };
   }
 
+  async extractProductsFromPDF(pdfText: string) {
+    try {
+      console.log('📄 [IA Service] Iniciando extração do PDF (Modo Híbrido: Lotes Paralelos)...');
+
+      const lines = pdfText.split('\n');
+      // 1. Aumentamos o pedaço para 50 linhas (menos requisições no total)
+      const chunkSize = 50;
+      const chunks: string[] = [];
+
+      for (let i = 0; i < lines.length; i += chunkSize) {
+        chunks.push(lines.slice(i, i + chunkSize).join('\n'));
+      }
+
+      console.log(
+        `🔪 [IA Service] PDF fatiado em ${chunks.length} pedaços. Iniciando leitura rápida...`,
+      );
+
+      let allProducts: any[] = [];
+
+      // 2. Definimos quantos pedaços a IA vai processar AO MESMO TEMPO
+      const maxConcurrent = 3;
+
+      for (let i = 0; i < chunks.length; i += maxConcurrent) {
+        // Pega um grupo de 3 pedaços
+        const batch = chunks.slice(i, i + maxConcurrent);
+        console.log(
+          `🚀 Processando grupo de pedaços ${i + 1} a ${i + batch.length} de ${chunks.length}...`,
+        );
+
+        // Dispara os 3 pedaços para a OpenAI exatamente no mesmo segundo
+        const promises = batch.map(async (chunk) => {
+          try {
+            const response = await openai.chat.completions.create({
+              model: 'gpt-4o-mini',
+              response_format: { type: 'json_object' },
+              messages: [
+                {
+                  role: 'system',
+                  content: `Você é um robô de extração de inventário altamente preciso.
+O texto fornecido vem de um PDF gerado pelo sistema CLIPP.
+As linhas do PDF seguem EXATAMENTE esta ordem de colunas:
+[Código] | [Descrição do Produto] | [Quantidade] | [Unitário] | [Qtd x Preço] | [Qtd x Custo] | [Qtd x C. Médio]
+
+Sua missão é extrair os produtos e retornar EXATAMENTE um JSON com a chave "produtos" contendo um array.
+Para cada produto, extraia e formate rigorosamente:
+- name: A coluna [Descrição do Produto]. TRANSCREVA O NOME EXATAMENTE COMO ESTÁ NA TABELA. É OBRIGATÓRIO manter sabores, pesos (ex: 3KG, 900G) e tamanhos (ex: M, G, 38). NUNCA resuma o nome, senão produtos diferentes serão fundidos.
+- description: Acesse sua base de dados e traga a DESCRIÇÃO REAL deste produto. SEJA BREVE E DIRETO: Use no máximo 2 frases curtas com foco comercial.
+- stock: A coluna [Quantidade]. Converta para número inteiro.
+- price: A coluna [Unitário]. Este é o PREÇO DO PRODUTO! Converta para número decimal.
+- categories: Array de strings. Classifique o produto (ex: ["Whey Protein", "Sem Lactose"]).
+
+⚠️ ATENÇÃO MÁXIMA AOS NÚMEROS:
+- O PRIMEIRO número após o nome do produto é a [Quantidade] (stock).
+- O SEGUNDO número após o nome do produto é o [Unitário] (price).
+- IGNORE os números gigantes no final da linha (Qtd x Preço, Qtd x Custo).`,
+                },
+                { role: 'user', content: chunk },
+              ],
+              temperature: 0,
+              max_tokens: 10000,
+            });
+
+            const content = response.choices[0].message.content || '{"produtos": []}';
+            const parsed = JSON.parse(content);
+            return parsed.produtos || [];
+          } catch (err) {
+            console.error(`❌ [IA Service] Erro ao processar fatia do grupo:`, err);
+            return []; // Em caso de erro numa fatia, retorna array vazio para não parar o resto
+          }
+        });
+
+        // Aguarda APENAS esse grupo de 3 terminar
+        const batchResults = await Promise.all(promises);
+
+        batchResults.forEach((chunkProducts) => {
+          allProducts = allProducts.concat(chunkProducts);
+        });
+
+        // Dá um respiro bem menor entre os grupos só para a OpenAI não dar block de spam
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+
+      console.log(
+        `✅ [IA Service] Extração concluída! Encontrados ${allProducts.length} itens no total.`,
+      );
+      return allProducts;
+    } catch (error) {
+      console.error('[OpenAI PDF Extraction Error]:', error);
+      throw new Error('Falha ao extrair dados do PDF.');
+    }
+  }
   // ─── Transcreve áudio do WhatsApp via Whisper da OpenAI ───
   async transcribeAudio(audioBuffer: Buffer): Promise<string> {
     const tempFilePath = path.join(os.tmpdir(), `whatsapp_audio_${Date.now()}.ogg`);
