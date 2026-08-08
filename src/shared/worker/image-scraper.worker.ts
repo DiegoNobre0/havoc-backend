@@ -43,60 +43,85 @@ export const imageScraperWorker = new Worker(
         },
         body: JSON.stringify({
           q: searchQuery,
-          gl: 'br', // Localização Brasil para resultados mais assertivos
-          hl: 'pt', // Idioma Português
-          num: 1, // Queremos apenas a primeira imagem
+          gl: 'br',
+          hl: 'pt',
+          num: 5, // 🔥 Pede 5 opções para termos margem de erro
         }),
       });
 
       if (!serperResponse.ok) throw new Error('Falha na API do Serper. Verifique sua chave.');
 
       const serperData = await serperResponse.json();
-      const imageUrl = serperData.images?.[0]?.imageUrl;
+      const imagens = serperData.images || [];
 
-      if (!imageUrl) {
+      if (imagens.length === 0) {
         console.log(`[Scraper] ⚠️ Nenhuma imagem encontrada no Google para: ${productName}`);
         return;
       }
 
-      // 2. Faz o Download da Imagem direto da fonte original
-      const imageResponse = await fetch(imageUrl);
-      const arrayBuffer = await imageResponse.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
+      let bufferValido = null;
+      let contentTypeValido = '';
 
-      // Pega o tipo da imagem (MimeType) que veio do site
-      const contentType = imageResponse.headers.get('content-type') || 'image/jpeg';
+      // 2. Loop de Segurança: Tenta baixar até encontrar um link que funcione
+      for (const img of imagens) {
+        try {
+          // Pula imagens em base64 nativas do google
+          if (img.imageUrl.startsWith('data:')) continue;
 
-      // 💡 O PULO DO GATO:
-      // Criamos um "arquivo falso" (mock) imitando o formato que o Fastify envia.
-      // Assim o seu StorageService processa a imagem original e faz o Sharp funcionar!
+          // Adiciona timeout para não travar o worker em sites lentos
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+          const imageResponse = await fetch(img.imageUrl, { signal: controller.signal });
+          clearTimeout(timeoutId);
+
+          if (!imageResponse.ok) continue; // Erro 403, 404, etc.
+
+          // Valida se o arquivo baixado é realmente uma imagem e não um HTML de bloqueio
+          const contentType = imageResponse.headers.get('content-type') || '';
+          if (!contentType.startsWith('image/')) continue;
+
+          const arrayBuffer = await imageResponse.arrayBuffer();
+          bufferValido = Buffer.from(arrayBuffer);
+          contentTypeValido = contentType;
+
+          break; // Sucesso absoluto! Quebra o loop e segue o jogo.
+        } catch (downloadError) {
+          console.log(`[Scraper] Link falhou (${img.imageUrl}), tentando a próxima opção...`);
+        }
+      }
+
+      if (!bufferValido) {
+        console.log(`[Scraper] ❌ Todos os links falharam para: ${productName}`);
+        return;
+      }
+
+      // 3. Faz o Upload com o arquivo 100% validado
       const mockFile = {
-        toBuffer: async () => buffer,
-        mimetype: contentType,
+        toBuffer: async () => bufferValido,
+        mimetype: contentTypeValido,
       };
 
-      // 3. Faz o Upload para o seu Bucket R2 via StorageService
-      // Passamos o nome da pasta ('products') e o nosso falso arquivo
       const uploadResult = await storageService.uploadFile('products', mockFile);
 
-      // 4. Atualiza o banco de dados com a URL oficial da sua nuvem
+      // 4. Atualiza o banco
       await prisma.product.update({
         where: { id: productId },
         data: {
           imageUrl: uploadResult.url,
-          imageKey: uploadResult.key, // Salvamos a chave também para você poder apagar do R2 no futuro!
+          imageKey: uploadResult.key,
         },
       });
 
-      console.log(`[Scraper] ✅ Imagem processada pelo Sharp e salva no R2 para: ${productName}`);
+      console.log(`[Scraper] ✅ Imagem blindada e salva no R2 para: ${productName}`);
     } catch (error) {
-      console.error(`[Scraper] ❌ Erro ao buscar imagem para ${productName}:`, error);
+      console.error(`[Scraper] ❌ Erro crítico ao buscar imagem para ${productName}:`, error);
     }
   },
   {
     connection: redis as any,
     concurrency: 1,
-    lockDuration: 60000, // Aumenta o tempo de lock para 60 segundos (o padrão é 30s)
-    lockRenewTime: 20000, // Renova o lock automaticamente a cada 20 segundos enquanto o job estiver rodando
+    lockDuration: 60000,
+    lockRenewTime: 20000,
   },
 );

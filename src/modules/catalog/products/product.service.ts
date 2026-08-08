@@ -180,6 +180,9 @@ export class ProductService {
           }
         }
 
+        // 🔥 Lógica dinâmica de estoque
+        const isProductActive = item.stock > 0;
+
         const existingProduct = await prisma.product.findFirst({
           where: {
             OR: [{ slug: slug }, { name: { equals: item.name, mode: 'insensitive' } }],
@@ -192,6 +195,7 @@ export class ProductService {
             where: { id: existingProduct.id },
             data: {
               stock: item.stock,
+              isActive: isProductActive, // 👈 Se for 0, desativa automaticamente; se for > 0, ativa.
               price: item.price,
               description: item.description || null, // 👈 Força null se vier undefined
               ...(item.cost !== undefined && { cost_price: item.cost }),
@@ -210,17 +214,19 @@ export class ProductService {
               description: item.description || null, // 👈 Força null se vier undefined
               ...(item.cost !== undefined && { cost_price: item.cost }),
               stock: item.stock,
-              isActive: true,
+              isActive: isProductActive, // 👈 Já nasce bloqueado se vier zerado do PDF
               ...(categoryConnectIds.length > 0 && { categories: { connect: categoryConnectIds } }),
             },
           });
           relatorio.criados++;
 
-          // Manda pro caçador de imagens
-          await imageScraperQueue.add('scrape-image', {
-            productId: newProduct.id,
-            productName: newProduct.name,
-          });
+          // Manda pro caçador de imagens apenas se o produto entrar com estoque
+          if (isProductActive) {
+            await imageScraperQueue.add('scrape-image', {
+              productId: newProduct.id,
+              productName: newProduct.name,
+            });
+          }
         }
       } catch (err) {
         console.error(`Erro ao importar ${item.name}:`, err);

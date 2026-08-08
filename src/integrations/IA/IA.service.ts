@@ -230,11 +230,13 @@ As linhas do PDF seguem EXATAMENTE esta ordem de colunas:
 
 Sua missão é extrair os produtos e retornar EXATAMENTE um JSON com a chave "produtos" contendo um array.
 Para cada produto, extraia e formate rigorosamente:
-- name: A coluna [Descrição do Produto]. TRANSCREVA O NOME EXATAMENTE COMO ESTÁ NA TABELA. É OBRIGATÓRIO manter sabores, pesos (ex: 3KG, 900G) e tamanhos (ex: M, G, 38). NUNCA resuma o nome, senão produtos diferentes serão fundidos.
+- name: A coluna [Descrição do Produto]. TRANSCREVA O NOME EXATAMENTE COMO ESTÁ NA TABELA. É OBRIGATÓRIO manter sabores, pesos e tamanhos. NUNCA resuma o nome.
 - description: Acesse sua base de dados e traga a DESCRIÇÃO REAL deste produto. SEJA BREVE E DIRETO: Use no máximo 2 frases curtas com foco comercial.
 - stock: A coluna [Quantidade]. Converta para número inteiro.
 - price: A coluna [Unitário]. Este é o PREÇO DO PRODUTO! Converta para número decimal.
-- categories: Array de strings. Classifique o produto (ex: ["Whey Protein", "Sem Lactose"]).
+- categories: Array de strings. Classifique o produto de forma EXTREMAMENTE ESPECÍFICA.
+  ⚠️ REGRA DE CATEGORIAS: NÃO use uma categoria genérica como "Whey Protein". Leia o nome do produto e especifique exatamente a filtragem (ex: "Whey Isolado", "Whey Concentrado", "Whey Hidrolisado", "Whey 3W"). Para outros produtos, use o padrão correto (ex: "Creatina", "Pré-Treino").
+  🚫 PROIBIDO: NUNCA crie categorias baseadas em sabores (ex: NUNCA crie "Baunilha", "Morango" ou "Chocolate") ou pesos.
 
 ⚠️ ATENÇÃO MÁXIMA AOS NÚMEROS:
 - O PRIMEIRO número após o nome do produto é a [Quantidade] (stock).
