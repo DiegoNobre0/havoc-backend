@@ -223,25 +223,48 @@ export class IAService {
               messages: [
                 {
                   role: 'system',
-                  content: `Você é um robô de extração de inventário altamente preciso.
+                  content: `Você é um robô de extração de inventário altamente preciso trabalhando para uma loja de suplementos.
 O texto fornecido vem de um PDF gerado pelo sistema CLIPP.
 As linhas do PDF seguem EXATAMENTE esta ordem de colunas:
 [Código] | [Descrição do Produto] | [Quantidade] | [Unitário] | [Qtd x Preço] | [Qtd x Custo] | [Qtd x C. Médio]
 
 Sua missão é extrair os produtos e retornar EXATAMENTE um JSON com a chave "produtos" contendo um array.
 Para cada produto, extraia e formate rigorosamente:
-- name: A coluna [Descrição do Produto]. TRANSCREVA O NOME EXATAMENTE COMO ESTÁ NA TABELA. É OBRIGATÓRIO manter sabores, pesos e tamanhos. NUNCA resuma o nome.
-- description: Acesse sua base de dados e traga a DESCRIÇÃO REAL deste produto. SEJA BREVE E DIRETO: Use no máximo 2 frases curtas com foco comercial.
+- name: A coluna [Descrição do Produto]. TRANSCREVA O NOME EXATAMENTE COMO ESTÁ NA TABELA. Mantenha os sabores e pesos.
+- description: Acesse sua base de dados e traga a DESCRIÇÃO REAL deste produto com foco comercial (máx 2 frases).
 - stock: A coluna [Quantidade]. Converta para número inteiro.
 - price: A coluna [Unitário]. Este é o PREÇO DO PRODUTO! Converta para número decimal.
-- categories: Array de strings. Classifique o produto de forma EXTREMAMENTE ESPECÍFICA.
-  ⚠️ REGRA DE CATEGORIAS: NÃO use uma categoria genérica como "Whey Protein". Leia o nome do produto e especifique exatamente a filtragem (ex: "Whey Isolado", "Whey Concentrado", "Whey Hidrolisado", "Whey 3W"). Para outros produtos, use o padrão correto (ex: "Creatina", "Pré-Treino").
-  🚫 PROIBIDO: NUNCA crie categorias baseadas em sabores (ex: NUNCA crie "Baunilha", "Morango" ou "Chocolate") ou pesos.
+
+- categories: Array de strings. Você DEVE aplicar MÚLTIPLAS TAGS estratégicas baseadas na finalidade do produto.
+  ⚠️ REGRA SUPREMA DE CATEGORIZAÇÃO: É estritamente PROIBIDO inventar categorias. Analise o nome do produto e aplique RIGOROSAMENTE uma das regras abaixo:
+  
+  * Se for Proteína da Carne (ex: Carnibol, Beef Protein): Retorne ["Whey Protein", "Proteína da Carne", "Sem Lactose"] (NOTA: Comercialmente a loja usa a tag Whey Protein para busca, obedeça).
+  * Se for Proteína Vegana (ex: Protein Plant, Vegan Tasty): Retorne ["Whey Protein", "Proteína Vegana", "Sem Lactose"]
+  * Se for Whey Isolado (ex: Iso Whey, Isolate, Isofort, Iso Hydro): Retorne ["Whey Protein", "Whey Isolado", "Sem Lactose"]
+  * Se for Whey Concentrado, Blends ou 3W (ex: Whey 100, 3W, Whey Crush, Tasty Whey, Gold Whey, Whey Noble, Whey Zero): Retorne ["Whey Protein", "Whey Concentrado"]
+  * Se for Pré-Treino (ex: Nuclear Rush, Bone Crusher, Bope, Warzone, Horus, Panic, Evora, Vapor X5, Rampage, Fckng Booster): Retorne ["Pré-Treino", "Energia"]
+  * Se for Termogênico, Diurético ou Emagrecedor (ex: Thermo Abdomen, L-Carnitina, Trinka, Mr Dry, Diurax, Cafeína, Sineflex, Clembuter, Dimethylex): Retorne ["Termogênico", "Emagrecedor"]
+  * Se for Hipercalórico (ex: Mass Titanium, Creamass, Hardmass, Masstodon, Captain Gainer): Retorne ["Hipercalórico", "Ganho de Peso"]
+  * Se for Creatina (ex: Creatina Hardcore, Creatine Turbo, Creafort): Retorne ["Creatina"]
+  * Se for Albumina ou Proteína do Ovo (ex: Albumina, Uevo): Retorne ["Albumina", "Proteína do Ovo", "Sem Lactose"]
+  * Se for Aminoácido (ex: Glutamina, BCAA, Beta-Alanina): Retorne ["Aminoácidos"]
+  * Se for Carboidrato ou Gel de Energia (ex: Maltodextrin, Dextrose, Waxy Maize, Energel, Palatinose, Vo2): Retorne ["Carboidratos", "Energia Rápida"]
+  * Se for Barra de Proteína ou Snack Doce (ex: Protein Crisp, Wafer, Cookies, Pipoca Proteica): Retorne ["Snacks e Barrinhas"]
+  * Se for Pasta de Amendoim ou Castanha (ex: Dr Peanut, Pasta Bendu, Overruam): Retorne ["Pasta de Amendoim"]
+  * Se for Colágeno (ex: Collagen, Colagentek, Colágeno): Retorne ["Colágeno", "Saúde e Beleza"]
+  * Se for Vitamina, Saúde ou Pré-Hormonal (ex: Ômega 3, ZMA, Tribulus, Maca Peruana, Multivitamínico, Magnésio, Melatonina, NAC, CoQ10, Afrodite, Testo Cycle): Retorne ["Vitaminas e Saúde"]
+  * Se for Acessório Esportivo (ex: Luva, Strap, Coqueteleira, Faixa Elástica, Mini Band, Sapatilha Fiber, Mochila, Bolsa, Garrafa): Retorne ["Acessórios"]
+  * Se for Vestuário (ex: Camisa, Boné, Bermuda, Tênis Fiber Fly): Retorne ["Vestuário"]
+  
+  🚫 PROIBIÇÕES ABSOLUTAS: 
+  1. NUNCA crie categorias com nomes de sabores (Baunilha, Morango, Chocolate, Limão, etc).
+  2. NUNCA use "Suplemento Energético". Use SEMPRE "Pré-Treino" e "Energia".
+  3. NUNCA crie categorias com tamanhos ou pesos (ex: 900g, M, G).
 
 ⚠️ ATENÇÃO MÁXIMA AOS NÚMEROS:
 - O PRIMEIRO número após o nome do produto é a [Quantidade] (stock).
 - O SEGUNDO número após o nome do produto é o [Unitário] (price).
-- IGNORE os números gigantes no final da linha (Qtd x Preço, Qtd x Custo).`,
+- IGNORE os números gigantes no final da linha.`,
                 },
                 { role: 'user', content: chunk },
               ],

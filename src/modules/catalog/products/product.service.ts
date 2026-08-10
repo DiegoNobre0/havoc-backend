@@ -221,12 +221,11 @@ export class ProductService {
           relatorio.criados++;
 
           // Manda pro caçador de imagens apenas se o produto entrar com estoque
-          if (isProductActive) {
-            await imageScraperQueue.add('scrape-image', {
-              productId: newProduct.id,
-              productName: newProduct.name,
-            });
-          }
+
+          await imageScraperQueue.add('scrape-image', {
+            productId: newProduct.id,
+            productName: newProduct.name,
+          });
         }
       } catch (err) {
         console.error(`Erro ao importar ${item.name}:`, err);
