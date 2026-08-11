@@ -58,8 +58,11 @@ export class ProductService {
   }
 
   async create(data: any) {
-    // 1. Extraímos o stock_qty que o Angular enviou separadamente
-    const { categoryIds, stock_qty, ...rest } = data;
+    // 1. Extraímos o category_ids exato que veio do frontend
+    const { category_ids, categoryIds, stock_qty, ...rest } = data;
+
+    // Garantia dupla: pega a variável que estiver preenchida
+    const catsToConnect = category_ids || categoryIds;
 
     const existingProduct = await prisma.product.findUnique({
       where: { slug: rest.slug },
@@ -73,9 +76,9 @@ export class ProductService {
     const product = await prisma.product.create({
       data: {
         ...rest,
-        stock: stock_qty, // 👈 2. A MÁGICA: Aqui nós salvamos na coluna correta 'stock'!
-        categories: categoryIds
-          ? { connect: categoryIds.map((id: string) => ({ id })) }
+        stock: stock_qty,
+        categories: catsToConnect
+          ? { connect: catsToConnect.map((id: string) => ({ id })) }
           : undefined,
       },
     });
@@ -85,18 +88,26 @@ export class ProductService {
   }
 
   async update(id: string, data: any) {
-    const { categoryIds, ...rest } = data;
+    const { category_ids, categoryIds, stock_qty, ...rest } = data;
+    const catsToConnect = category_ids || categoryIds;
+
     const product = await prisma.product.update({
       where: { id },
       data: {
         ...rest,
-        categories: categoryIds ? { set: categoryIds.map((id: string) => ({ id })) } : undefined,
+        // Só atualiza o estoque se ele for enviado
+        ...(stock_qty !== undefined && { stock: stock_qty }),
+
+        // 👇 AQUI USA 'set' PARA SUBSTITUIR A LISTA DE CATEGORIAS
+        categories: catsToConnect
+          ? { set: catsToConnect.map((catId: string) => ({ id: catId })) }
+          : undefined,
       },
     });
+
     await this.clearCache();
     return product;
   }
-
   async toggleStatus(id: string, isActive: boolean) {
     const product = await prisma.product.update({
       where: { id },
