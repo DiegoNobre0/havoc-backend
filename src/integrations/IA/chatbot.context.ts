@@ -398,7 +398,10 @@ export class ChatbotContext {
     }
 
     const condicoesAND = termos.map((termo) => ({
-      name: { contains: termo, mode: 'insensitive' as const },
+      OR: [
+        { name: { contains: termo, mode: 'insensitive' as const } },
+        { categories: { some: { name: { contains: termo, mode: 'insensitive' as const } } } },
+      ],
     }));
 
     // 2. BUSCA EXCLUSIVA NOS PRODUTOS ISOLADOS (A Mágica da Limpeza)

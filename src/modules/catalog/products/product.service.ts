@@ -58,7 +58,8 @@ export class ProductService {
   }
 
   async create(data: any) {
-    const { categoryIds, ...rest } = data;
+    // 1. Extraímos o stock_qty que o Angular enviou separadamente
+    const { categoryIds, stock_qty, ...rest } = data;
 
     const existingProduct = await prisma.product.findUnique({
       where: { slug: rest.slug },
@@ -72,6 +73,7 @@ export class ProductService {
     const product = await prisma.product.create({
       data: {
         ...rest,
+        stock: stock_qty, // 👈 2. A MÁGICA: Aqui nós salvamos na coluna correta 'stock'!
         categories: categoryIds
           ? { connect: categoryIds.map((id: string) => ({ id })) }
           : undefined,

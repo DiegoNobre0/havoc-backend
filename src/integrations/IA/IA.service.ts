@@ -238,10 +238,11 @@ Para cada produto, extraia e formate rigorosamente:
 - categories: Array de strings. Você DEVE aplicar MÚLTIPLAS TAGS estratégicas baseadas na finalidade do produto.
   ⚠️ REGRA SUPREMA DE CATEGORIZAÇÃO: É estritamente PROIBIDO inventar categorias. Analise o nome do produto e aplique RIGOROSAMENTE uma das regras abaixo:
   
-  * Se for Proteína da Carne (ex: Carnibol, Beef Protein): Retorne ["Whey Protein", "Proteína da Carne", "Sem Lactose"] (NOTA: Comercialmente a loja usa a tag Whey Protein para busca, obedeça).
+  ypeScript
+  * Se for Proteína da Carne (ex: Carnibol, Beef Protein): Retorne ["Whey Protein", "Proteína da Carne", "Sem Lactose"]
   * Se for Proteína Vegana (ex: Protein Plant, Vegan Tasty): Retorne ["Whey Protein", "Proteína Vegana", "Sem Lactose"]
   * Se for Whey Isolado (ex: Iso Whey, Isolate, Isofort, Iso Hydro): Retorne ["Whey Protein", "Whey Isolado", "Sem Lactose"]
-  * Se for Whey Concentrado, Blends ou 3W (ex: Whey 100, 3W, Whey Crush, Tasty Whey, Gold Whey, Whey Noble, Whey Zero): Retorne ["Whey Protein", "Whey Concentrado"]
+  * Se for Whey Concentrado, Blends ou 3W (ex: Whey 100, 100 Pure, 3W, Whey Crush, Tasty Whey, Gold Whey, Whey Noble, Whey Zero): Retorne ["Whey Protein", "Whey Concentrado"]
   * Se for Pré-Treino (ex: Nuclear Rush, Bone Crusher, Bope, Warzone, Horus, Panic, Evora, Vapor X5, Rampage, Fckng Booster): Retorne ["Pré-Treino", "Energia"]
   * Se for Termogênico, Diurético ou Emagrecedor (ex: Thermo Abdomen, L-Carnitina, Trinka, Mr Dry, Diurax, Cafeína, Sineflex, Clembuter, Dimethylex): Retorne ["Termogênico", "Emagrecedor"]
   * Se for Hipercalórico (ex: Mass Titanium, Creamass, Hardmass, Masstodon, Captain Gainer): Retorne ["Hipercalórico", "Ganho de Peso"]
@@ -255,7 +256,7 @@ Para cada produto, extraia e formate rigorosamente:
   * Se for Vitamina, Saúde ou Pré-Hormonal (ex: Ômega 3, ZMA, Tribulus, Maca Peruana, Multivitamínico, Magnésio, Melatonina, NAC, CoQ10, Afrodite, Testo Cycle): Retorne ["Vitaminas e Saúde"]
   * Se for Acessório Esportivo (ex: Luva, Strap, Coqueteleira, Faixa Elástica, Mini Band, Sapatilha Fiber, Mochila, Bolsa, Garrafa): Retorne ["Acessórios"]
   * Se for Vestuário (ex: Camisa, Boné, Bermuda, Tênis Fiber Fly): Retorne ["Vestuário"]
-  
+  🚫 REGRA ANTI-ALUCINAÇÃO DE WHEY: Produtos que contêm "PURE", "100 PURE" ou "100%" (ex: 100 Pure Integralmedica) SÃO WHEY CONCENTRADO. É estritamente PROIBIDO marcá-los como Isolado. Para receber a tag "Whey Isolado", o nome do produto DEVE obrigatoriamente conter a palavra "ISO" ou "ISOLATE".
   🚫 PROIBIÇÕES ABSOLUTAS: 
   1. NUNCA crie categorias com nomes de sabores (Baunilha, Morango, Chocolate, Limão, etc).
   2. NUNCA use "Suplemento Energético". Use SEMPRE "Pré-Treino" e "Energia".
@@ -513,13 +514,10 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
         type: 'function',
         function: {
           name: 'listar_produtos',
-          description: `Busca produtos e acessórios no banco de dados. 
+          description: `Busca produtos e categorias no banco de dados. 
 ⚠️ REGRA DE OURO (TRADUÇÃO E MAPEAMENTO DO CATÁLOGO):
-O banco de dados possui nomes em Inglês e Português misturados (ex: "Creatine", "Beef Protein", "Thermogenic").
-Para a busca não falhar, VOCÊ (IA) DEVE adaptar o pedido do cliente para a RAIZ da palavra no banco de dados.
-Siga ESTE MAPEAMENTO OBRIGATÓRIO de conversão:
-1. Se o cliente pedir "Creatina" -> envie termo_busca: 'creatin' (acha tanto Creatina quanto Creatine).
-2. Se o cliente pedir "Proteína", "Massa" ou "Whey" -> envie termo_busca: 'whey' OU 'protein'.
+1. Adapte o pedido para a raiz da palavra. Ex: "Creatina" -> 'creatin'. "Termogênico" -> 'thermogenic'.
+2. SE O CLIENTE PEDIR UM TIPO ESPECÍFICO (ex: "Whey Isolado", "Proteína Isolada"), envie termo_busca: 'whey isolado'. NÃO envie apenas 'whey', senão você trará os concentrados misturados!
 3. Se o cliente pedir "Proteína da carne" -> envie termo_busca: 'beef' OU 'carnibol'.
 4. Se o cliente pedir "Albumina" ou "Proteína do ovo" -> envie termo_busca: 'albumina' OU 'uevo'.
 5. Se o cliente pedir "Pré-treino" ou "Energia" -> envie termo_busca: 'treino' OU 'booster' OU 'rush'.
