@@ -336,7 +336,9 @@ Gere os argumentos e chame a ferramenta listar_produtos AGORA buscando mais alte
         textoFinal = `[FINALIZAR_PEDIDO] 
 O cliente clicou no botão para fechar o pedido.
 Carrinho atual: ${carrinhoTexto}.
-⚠️ INSTRUÇÃO DO SISTEMA: Inicie a ETAPA 6 agora. Execute APENAS o PASSO 1 do Checkout (pergunte sobre Retirada ou Entrega e pare).`;
+⚠️ INSTRUÇÃO DO SISTEMA: Inicie a ETAPA 6 de Checkout.
+- REGRA DE MEMÓRIA: Se você JÁ SABE se é Retirada/Entrega e JÁ SABE a Forma de Pagamento (porque o cliente já informou nesta conversa), PULE as perguntas e gere IMEDIATAMENTE o PASSO 3 (Resumo do Pedido atualizado).
+- Se faltar alguma informação (como endereço ou forma de pagamento), pergunte APENAS o que falta.`;
       }
       // 5. Botão de Confirmar Resumo (Sim, gerar pedido)
       else if (textoFinal?.includes('[GERAR_CHECKOUT_AGORA]')) {
