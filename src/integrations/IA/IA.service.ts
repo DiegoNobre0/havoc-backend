@@ -479,7 +479,24 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
    👉 IF (Cliente escolheu RETIRADA): 🚫 PULE A PERGUNTA DE ENDEREÇO COMPLETAMENTE. Vá direto para a forma de pagamento e pergunte: "Perfeito! O pagamento vai ser no *PIX*, *Cartão* ou *Dinheiro*?".
    👉 IF (Cliente escolheu ENTREGA): Peça o endereço completo. Após o cliente enviar, chame a ferramenta 'calcular_frete'. Depois, informe o valor e avise que o envio é via Uber, perguntando se o pagamento antecipado será no *PIX* ou *Cartão* (não aceite dinheiro para entrega via Uber).
 
-- PASSO 3 (Resumo para Aprovação): Tendo os 3 dados (Produtos, Retirada/Entrega e Pagamento), monte um resumo listando os itens, valor do frete, total e forma de pagamento. ⚠️ REGRA ABSOLUTA: No final da resposta, adicione a tag OBRIGATÓRIA [BOTOES_CONFIRMACAO_FINAL]. NÃO chame a ferramenta de gerar pedido!
+- PASSO 3 (Resumo para Aprovação): Tendo os 3 dados (Produtos, Retirada/Entrega e Pagamento), monte um resumo ESTRUTURADO, BONITO e DETALHADO do pedido.
+  ⚠️ REGRA MATEMÁTICA: O seu "Carrinho atual" possui o valor exato de cada item. Extraia os valores, liste-os e some tudo com MUITA atenção (Soma dos Itens + Frete = Total).
+
+  Use EXATAMENTE este layout abaixo (sem adicionar asteriscos duplos):
+
+  📦 *Resumo do seu Pedido*
+
+  *Itens:*
+  ▫️ 1x [Nome do Produto 1] - R$ [Valor]
+  ▫️ 1x [Nome do Produto 2] - R$ [Valor]
+
+  🚚 *Frete/Entrega:* R$ [Valor do frete ou "Grátis - Retirada"]
+  💳 *Pagamento:* [Forma escolhida]
+
+  💰 *Total do Pedido:* R$ [Soma Exata]
+
+  Está tudo certo? Posso prosseguir com o fechamento do pedido?
+  ⚠️ REGRA ABSOLUTA: No final da resposta, adicione a tag OBRIGATÓRIA [BOTOES_CONFIRMACAO_FINAL]. NÃO chame a ferramenta de gerar pedido!
 
 - PASSO 4 (Geração): APENAS quando o cliente confirmar no resumo (você receberá a tag oculta [GERAR_CHECKOUT_AGORA]), chame a ferramenta 'gerar_resumo_e_checkout'.
 `;
@@ -618,7 +635,10 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
                 items: {
                   type: 'object',
                   properties: {
-                    nome_produto: { type: 'string' },
+                    nome_produto: {
+                      type: 'string',
+                      description: 'Apenas o nome LIMPO do produto, sem o preço ou quantidade',
+                    },
                     quantidade: { type: 'number' },
                   },
                 },

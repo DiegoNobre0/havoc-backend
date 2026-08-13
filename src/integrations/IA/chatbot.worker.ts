@@ -241,10 +241,28 @@ O cliente escolheu o item "${inputLimpo}" da lista, que corresponde a "${nomePro
           .trim();
         if (nomeProduto.includes('Sim, é esse')) nomeProduto = 'Produto Anterior';
 
-        textoParaHistorico = `Sim, é esse! Produto: ${nomeProduto}`;
+        // 👉 NOVA LÓGICA: Busca o preço no banco para a IA não errar a soma no final!
+        const produtoBanco = await prisma.product.findFirst({
+          where: { name: { equals: nomeProduto, mode: 'insensitive' } },
+        });
+
+        let precoContexto = '';
+        if (produtoBanco) {
+          precoContexto = ` (R$ ${Number(produtoBanco.price).toFixed(2)})`;
+        } else {
+          const kitBanco = await prisma.kit.findFirst({
+            where: { name: { equals: nomeProduto, mode: 'insensitive' } },
+          });
+          if (kitBanco) precoContexto = ` (R$ ${Number(kitBanco.finalPrice).toFixed(2)})`;
+        }
+
+        // Concatena o nome com o preço (Ex: "Whey Protein (R$ 150.00)")
+        const itemComPreco = `${nomeProduto}${precoContexto}`;
+
+        textoParaHistorico = `Sim, é esse! Produto: ${itemComPreco}`;
 
         session.carrinho = session.carrinho || [];
-        session.carrinho.push(nomeProduto);
+        session.carrinho.push(itemComPreco);
         await saveSession(sKey, session);
 
         const carrinhoTexto = session.carrinho.join(', ');
