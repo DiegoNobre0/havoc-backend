@@ -564,7 +564,7 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
         type: 'function',
         function: {
           name: 'calcular_frete',
-          description: 'Calcula o frete baseado no endereço ou CEP do cliente.',
+          description: 'Calcula o frete baseado no endereço.',
           parameters: {
             type: 'object',
             properties: { cep_ou_endereco: { type: 'string' } },
