@@ -465,7 +465,7 @@ ETAPA 3 — APRESENTAÇÃO:
 - INICIANTE: Diga: "Para começar certo, o ideal é: 💪 Whey e ⚡ Creatina. Posso te mostrar as opções?" -> Se "Sim", busque o produto.
 
 ETAPA 4 — DETALHES E BOTÕES:
-e o cliente escolheu um produto da lista (digitando o número OU o nome), ⚠️ É TOTALMENTE PROIBIDO descrever o produto ou dar o preço usando sua memória. Você DEVE OBRIGATORIAMENTE chamar a ferramenta 'ver_detalhes_do_produto' imediatamente.
+Se o cliente escolheu um produto (seja pelo número, nome ou APENAS O SABOR), ⚠️ É TOTALMENTE PROIBIDO descrever o produto da sua memória. Chame a ferramenta 'ver_detalhes_do_produto' AGORA. Se ele disse apenas o sabor, junte com o nome do produto que vocês estavam conversando para formar o NOME COMPLETO.
 
 ETAPA 5 — UPSELL:
 Siga a instrução invisível para sugerir complemento.
@@ -552,7 +552,7 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
         function: {
           name: 'ver_detalhes_do_produto',
           description:
-            'OBRIGATÓRIO: Você DEVE usar esta ferramenta TODA VEZ que o cliente escolher um produto da lista (ex: digitar "1", "2" ou o nome). ⚠️ REGRA ABSOLUTA: NUNCA responda diretamente usando sua memória da listagem. É a execução desta ferramenta que injeta os botões de compra na tela do cliente. Passe o NOME COMPLETO do produto (ex: "Black Skull Creatine Hardcore 150g"). É estritamente proibido passar apenas números.',
+            'OBRIGATÓRIO: Use para exibir os detalhes de um produto. ⚠️ REGRA ABSOLUTA: Passe o NOME COMPLETO do produto (Nome + Marca + Sabor). Se o cliente citar apenas um sabor (ex: "Chocolate"), VERIFIQUE O HISTÓRICO para saber de qual produto ele está falando e junte tudo (ex: "Whey 100 Pure Integral Medica Chocolate"). É estritamente proibido passar apenas o sabor ou apenas números.',
           parameters: {
             type: 'object',
             properties: { nome_produto: { type: 'string' } },
@@ -656,6 +656,7 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
     // ─── 4. Lógica de Trava da Busca (Mágica Ocorre Aqui) ───
     let forcedTool: any = 'auto';
     let forcedTemperature = config?.temperature ?? 0.7;
+    let overrideDetalhesName: string | null = null; // 👈 NOVA Variável para blindar o argumento
 
     if (userMessage.includes('[FORCAR_BUSCA]')) {
       forcedTool = { type: 'function', function: { name: 'listar_produtos' } };
@@ -663,6 +664,12 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
     } else if (userMessage.includes('[FORCAR_DETALHES:')) {
       forcedTool = { type: 'function', function: { name: 'ver_detalhes_do_produto' } };
       forcedTemperature = 0;
+
+      // Extrai o nome EXATO do produto gerado pelo Worker
+      const match = userMessage.match(/\[FORCAR_DETALHES:(.*?)\]/);
+      if (match) {
+        overrideDetalhesName = match[1].trim();
+      }
     }
 
     // ─── 5. Chama a API da OpenAI UMA ÚNICA VEZ para pegar a resposta/tool ───
@@ -687,6 +694,14 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
       for (const toolCall of responseMessage.tool_calls) {
         if (toolCall.type === 'function') {
           const args = JSON.parse(toolCall.function.arguments);
+
+          if (toolCall.function.name === 'ver_detalhes_do_produto' && overrideDetalhesName) {
+            args.nome_produto = overrideDetalhesName;
+            console.log(
+              `[IA Service] 🛡️ Argumento corrigido à força para: ${overrideDetalhesName}`,
+            );
+          }
+
           const { result, handoff, extractedTags } = await this.executeTool(
             toolCall.function.name,
             args,

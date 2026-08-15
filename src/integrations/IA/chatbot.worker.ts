@@ -193,16 +193,37 @@ Visão identificou: "${descricao}".
           const indice = parseInt(inputLimpo) - 1;
           nomeProdutoEncontrado = lista[indice];
         } else if (inputLimpo.length > 2) {
-          // Se digitou parte do texto (ex: "max titanium 500g")
-          // Ignora palavras soltas do funil
-          const palavrasIgnoradas = ['sim', 'nao', 'não', 'quero', 'esse', 'gostei', 'ok'];
-          if (!palavrasIgnoradas.includes(inputLimpo.toLowerCase())) {
-            // Procura se o texto digitado bate com algum item da lista do Redis
-            const palavrasDigitadas = inputLimpo.toLowerCase().split(' ');
+          // Filtra palavras de ligação para sobrar só o que importa (ex: "quero o de chocolate" -> "chocolate")
+          const palavrasIgnoradas = [
+            'sim',
+            'nao',
+            'não',
+            'quero',
+            'esse',
+            'gostei',
+            'ok',
+            'de',
+            'da',
+            'do',
+            'o',
+            'a',
+            'um',
+            'uma',
+            'manda',
+            've',
+            'ver',
+            'qual',
+          ];
 
+          const palavrasDigitadas = inputLimpo
+            .toLowerCase()
+            .split(' ')
+            .filter((palavra: any) => palavra.length > 2 && !palavrasIgnoradas.includes(palavra));
+
+          if (palavrasDigitadas.length > 0) {
             nomeProdutoEncontrado = lista.find((p: string) => {
               const nomeProdutoLower = p.toLowerCase();
-              // Verifica se cada palavra que o cliente digitou existe dentro do nome do produto
+              // Verifica se as palavras úteis existem no nome do produto listado na memória
               return palavrasDigitadas.every((palavra: string) =>
                 nomeProdutoLower.includes(palavra),
               );
