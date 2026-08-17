@@ -407,7 +407,7 @@ export class ChatbotContext {
     // 2. BUSCA EXCLUSIVA NOS PRODUTOS ISOLADOS (A Mágica da Limpeza)
     const products = await prisma.product.findMany({
       where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND }, // 🔥 Adicionado stock: { gt: 0 }
-      take: 15,
+      // take: 15,
       select: { name: true, price: true },
     });
 
