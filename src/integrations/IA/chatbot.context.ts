@@ -415,19 +415,91 @@ export class ChatbotContext {
       return `Não encontrei produtos exatamente para "${termoBusca}".`;
     }
 
+    // 1. Agrupamento Dinâmico por Similaridade (Sem lista fixa de sabores!)
+    const grupos: { nomeOriginal: string; baseName: string; itens: any[] }[] = [];
+
+    for (const p of products) {
+      // Quebra o nome do produto em palavras
+      const palavrasP = p.name.split(' ');
+      let encontrouGrupo = false;
+
+      for (const grupo of grupos) {
+        const palavrasGrupo = grupo.nomeOriginal.split(' ');
+
+        // Verifica quais palavras são idênticas entre os dois produtos
+        const palavrasComuns = palavrasP.filter((palavra: string) =>
+          palavrasGrupo.includes(palavra),
+        );
+
+        // Se 60% do nome for idêntico, assumimos que é o mesmo produto variando o sabor/tamanho
+        if (palavrasComuns.length / Math.max(palavrasP.length, palavrasGrupo.length) >= 0.6) {
+          // O "Nome Base" vira APENAS as palavras iguais (Remove o sabor automaticamente!)
+          // Ex: Fica "WHEY 100 PURE 900G INTEGRAL"
+          grupo.baseName = palavrasComuns.join(' ');
+
+          // O sabor do item atual é a palavra que "sobrou" (que é diferente)
+          const saborP = palavrasP
+            .filter((palavra: string) => !palavrasComuns.includes(palavra))
+            .join(' ');
+
+          // Como achamos um par, ajustamos o sabor do primeiro item que já estava no grupo
+          if (grupo.itens.length === 1) {
+            const saborItem1 = palavrasGrupo
+              .filter((palavra: string) => !palavrasComuns.includes(palavra))
+              .join(' ');
+            grupo.itens[0].flavor = saborItem1 || 'Tradicional';
+          }
+
+          grupo.itens.push({ ...p, flavor: saborP || 'Tradicional' });
+          encontrouGrupo = true;
+          break;
+        }
+      }
+
+      if (!encontrouGrupo) {
+        // É um produto novo, cria um grupo pra ele
+        grupos.push({ nomeOriginal: p.name, baseName: p.name, itens: [{ ...p, flavor: '' }] });
+      }
+    }
+
+    // 2. Montando a visualização e o Cache para o Redis
     let text = `Encontrei essas opções pra você 👇\n\n`;
     let contador = 1;
+    const nomesParaRedis: string[] = [];
 
-    // Lista apenas os produtos isolados
-    products.forEach((p) => {
-      text += `*${contador}. ${p.name}*\n💰 R$ ${Number(p.price).toFixed(2)}\n\n`;
-      contador++;
+    grupos.forEach((grupo) => {
+      if (grupo.itens.length === 1) {
+        // Item único, exibe normalmente
+        text += `*${contador}. ${grupo.itens[0].name}*\n💰 R$ ${Number(grupo.itens[0].price).toFixed(2)}\n\n`;
+        nomesParaRedis.push(grupo.itens[0].name);
+        contador++;
+      } else {
+        // Vários sabores! Junta tudo bonitinho
+        const listaSabores = grupo.itens
+          .map((i) => {
+            const s = i.flavor || 'Original';
+            // Capitaliza a primeira letra pra ficar estético
+            return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+          })
+          .join(', ');
+
+        text += `*${contador}. ${grupo.baseName}*\n🎨 Sabores: ${listaSabores}\n💰 R$ ${Number(grupo.itens[0].price).toFixed(2)}\n\n`;
+
+        // O Índice do cliente aponta para o Nome Base
+        nomesParaRedis.push(grupo.baseName);
+
+        // Esconde os nomes completos no array pro bot achar se o cliente digitar o sabor depois
+        grupo.itens.forEach((i) => nomesParaRedis.push(i.name));
+
+        contador++;
+      }
     });
 
     text += `_Qual desses te interessou? Me fala o nome do produto ou o número!_`;
 
-    // Salva o resultado da busca no Redis por 30 minutos (1800 segundos)
+    // 3. Salva no Redis
     try {
+      // await redis.set(`lista_produtos:${sessionKey}`, JSON.stringify(nomesParaRedis), 'EX', 1800);
       await redis.set(cacheKey, text, 'EX', 1800);
     } catch (err) {
       console.error('⚠️ [Redis Error] Falha ao salvar cache:', err);
@@ -532,10 +604,19 @@ export class ChatbotContext {
       });
       if (prodEncontrado) return formatarProduto(prodEncontrado);
     } else {
-      const prodEncontrado = await prisma.product.findFirst({
+      const produtosEncontrados = await prisma.product.findMany({
         where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
       });
-      if (prodEncontrado) return formatarProduto(prodEncontrado);
+      if (produtosEncontrados.length > 1) {
+        // Encontrou o produto, mas tem vários sabores diferentes!
+        const listaOpcoes = produtosEncontrados.map((p) => `- ${p.name}`).join('\n');
+        return `⚠️ O item base "${nomeProduto}" foi encontrado, mas existem múltiplas variações de sabor/tamanho.\n
+INSTRUÇÃO DE SISTEMA: Diga ao cliente que você encontrou o produto, MAS exija que ele escolha uma das opções abaixo antes de prosseguir. NÃO emita botões de confirmação ainda.\n
+Opções:\n${listaOpcoes}`;
+      } else if (produtosEncontrados.length === 1) {
+        // Encontrou o produto exato e único!
+        return formatarProduto(produtosEncontrados[0]);
+      }
 
       const kitEncontrado = await prisma.kit.findFirst({
         where: { isActive: true, AND: condicoesAND },
