@@ -330,6 +330,21 @@ export class ChatbotContext {
     }
   }
 
+  private normalizarPalavras(nome: string): string[] {
+    const semAcento = nome
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+
+    return semAcento.split(' ').filter((palavra) => {
+      const limpo = palavra.trim();
+      if (limpo.length === 0) return false;
+      // remove tokens de peso/embalagem: 900g, 907g, 1kg, 500ml, 34g etc.
+      if (/^\d+[a-z]*$/.test(limpo)) return false;
+      return true;
+    });
+  }
+
   async listarProdutos(termoBusca: string): Promise<string> {
     // 1. Limpeza inteligente e Tradução Universal de Suplementos
     let termoLimpo = termoBusca
@@ -373,7 +388,6 @@ export class ChatbotContext {
       'formula',
     ];
 
-    // Filtra palavras inúteis e números isolados
     const termos = termoLimpo
       .split(' ')
       .filter((t) => t.trim().length > 1 && !palavrasInuteis.includes(t) && isNaN(Number(t)));
@@ -382,11 +396,9 @@ export class ChatbotContext {
       return 'Por favor, seja mais específico no nome do produto.';
     }
 
-    // 👉 Alterei levemente a chave de cache para não dar conflito com o cache antigo que tinha kits
     const searchKey = termos.join('-');
     const cacheKey = `chatbot:busca:isolada:${searchKey}`;
 
-    // Tenta buscar no Redis O(1) antes de bater no banco
     try {
       const cached = await redis.get(cacheKey);
       if (cached) {
@@ -404,48 +416,74 @@ export class ChatbotContext {
       ],
     }));
 
-    // 2. BUSCA EXCLUSIVA NOS PRODUTOS ISOLADOS (A Mágica da Limpeza)
     const products = await prisma.product.findMany({
-      where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND }, // 🔥 Adicionado stock: { gt: 0 }
-      // take: 15,
-      select: { name: true, price: true },
+      where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
+      select: { name: true, price: true, categories: { select: { name: true } } },
     });
 
     if (products.length === 0) {
       return `Não encontrei produtos exatamente para "${termoBusca}".`;
     }
 
-    // 1. Agrupamento Dinâmico por Similaridade (Sem lista fixa de sabores!)
+    // 1. Agrupamento Dinâmico por Similaridade (CORRIGIDO: normalização + denominador mínimo)
     const grupos: { nomeOriginal: string; baseName: string; itens: any[] }[] = [];
 
     for (const p of products) {
-      // Quebra o nome do produto em palavras
-      const palavrasP = p.name.split(' ');
+      const palavrasP = this.normalizarPalavras(p.name);
       let encontrouGrupo = false;
 
       for (const grupo of grupos) {
-        const palavrasGrupo = grupo.nomeOriginal.split(' ');
+        const palavrasGrupo = this.normalizarPalavras(grupo.nomeOriginal);
 
-        // Verifica quais palavras são idênticas entre os dois produtos
         const palavrasComuns = palavrasP.filter((palavra: string) =>
           palavrasGrupo.includes(palavra),
         );
 
-        // Se 60% do nome for idêntico, assumimos que é o mesmo produto variando o sabor/tamanho
-        if (palavrasComuns.length / Math.max(palavrasP.length, palavrasGrupo.length) >= 0.6) {
-          // O "Nome Base" vira APENAS as palavras iguais (Remove o sabor automaticamente!)
-          // Ex: Fica "WHEY 100 PURE 900G INTEGRAL"
-          grupo.baseName = palavrasComuns.join(' ');
+        const menorTamanho = Math.min(palavrasP.length, palavrasGrupo.length);
 
-          // O sabor do item atual é a palavra que "sobrou" (que é diferente)
-          const saborP = palavrasP
-            .filter((palavra: string) => !palavrasComuns.includes(palavra))
+        const categoriasBatem = this.mesmasCategorias(p.categories, grupo.itens[0].categories);
+
+        // Usa o MENOR nome como base — evita que sabores compostos ("Frutas Vermelhas")
+        // percam pra sabores de uma palavra só ("Chocolate")
+        if (categoriasBatem && menorTamanho > 0 && palavrasComuns.length / menorTamanho >= 0.6) {
+          // Nome base = palavras comuns, na ordem original (usando o nome original do grupo pra exibir bonito)
+          const palavrasGrupoOriginal = grupo.nomeOriginal.split(' ');
+          const palavrasComunsOriginal = palavrasGrupoOriginal.filter((palavraOrig: string) => {
+            const norm = palavraOrig
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .toLowerCase();
+            return (
+              palavrasComuns.includes(norm) ||
+              (/^\d+[a-z]*$/.test(norm) === false && palavrasComuns.includes(norm))
+            );
+          });
+
+          grupo.baseName =
+            palavrasComunsOriginal.length > 0 ? palavrasComunsOriginal.join(' ') : grupo.baseName;
+
+          // Sabor = palavras normalizadas que sobraram, mas exibindo a versão original
+          const palavrasPOriginal = p.name.split(' ');
+          const saborP = palavrasPOriginal
+            .filter((palavraOrig: string) => {
+              const norm = palavraOrig
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase();
+              return !palavrasComuns.includes(norm);
+            })
             .join(' ');
 
-          // Como achamos um par, ajustamos o sabor do primeiro item que já estava no grupo
           if (grupo.itens.length === 1) {
-            const saborItem1 = palavrasGrupo
-              .filter((palavra: string) => !palavrasComuns.includes(palavra))
+            const palavrasItem1Original = grupo.itens[0].name.split(' ');
+            const saborItem1 = palavrasItem1Original
+              .filter((palavraOrig: string) => {
+                const norm = palavraOrig
+                  .normalize('NFD')
+                  .replace(/[\u0300-\u036f]/g, '')
+                  .toLowerCase();
+                return !palavrasComuns.includes(norm);
+              })
               .join(' ');
             grupo.itens[0].flavor = saborItem1 || 'Tradicional';
           }
@@ -457,7 +495,6 @@ export class ChatbotContext {
       }
 
       if (!encontrouGrupo) {
-        // É um produto novo, cria um grupo pra ele
         grupos.push({ nomeOriginal: p.name, baseName: p.name, itens: [{ ...p, flavor: '' }] });
       }
     }
@@ -469,26 +506,20 @@ export class ChatbotContext {
 
     grupos.forEach((grupo) => {
       if (grupo.itens.length === 1) {
-        // Item único, exibe normalmente
         text += `*${contador}. ${grupo.itens[0].name}*\n💰 R$ ${Number(grupo.itens[0].price).toFixed(2)}\n\n`;
         nomesParaRedis.push(grupo.itens[0].name);
         contador++;
       } else {
-        // Vários sabores! Junta tudo bonitinho
         const listaSabores = grupo.itens
           .map((i) => {
             const s = i.flavor || 'Original';
-            // Capitaliza a primeira letra pra ficar estético
             return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
           })
           .join(', ');
 
         text += `*${contador}. ${grupo.baseName}*\n🎨 Sabores: ${listaSabores}\n💰 R$ ${Number(grupo.itens[0].price).toFixed(2)}\n\n`;
 
-        // O Índice do cliente aponta para o Nome Base
         nomesParaRedis.push(grupo.baseName);
-
-        // Esconde os nomes completos no array pro bot achar se o cliente digitar o sabor depois
         grupo.itens.forEach((i) => nomesParaRedis.push(i.name));
 
         contador++;
@@ -497,9 +528,7 @@ export class ChatbotContext {
 
     text += `_Qual desses te interessou? Me fala o nome do produto ou o número!_`;
 
-    // 3. Salva no Redis
     try {
-      // await redis.set(`lista_produtos:${sessionKey}`, JSON.stringify(nomesParaRedis), 'EX', 1800);
       await redis.set(cacheKey, text, 'EX', 1800);
     } catch (err) {
       console.error('⚠️ [Redis Error] Falha ao salvar cache:', err);
@@ -741,5 +770,13 @@ Opções:\n${listaOpcoes}`;
       console.error('Erro ao cancelar:', error);
       return 'Ocorreu um erro ao cancelar, mas já limpei sua sessão.';
     }
+  }
+
+  private mesmasCategorias(catsA: { name: string }[], catsB: { name: string }[]): boolean {
+    const nomesA = catsA.map((c) => c.name).sort();
+    const nomesB = catsB.map((c) => c.name).sort();
+
+    if (nomesA.length !== nomesB.length) return false;
+    return nomesA.every((nome, i) => nome === nomesB[i]);
   }
 }
