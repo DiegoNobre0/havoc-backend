@@ -354,11 +354,10 @@ export class ChatbotContext {
     // 1. Limpeza inteligente e Tradução Universal de Suplementos
     let termoLimpo = termoBusca
       .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '') // Tira acentos
+      .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
       .trim();
 
-    // Dicionário de palavras inúteis
     const palavrasInuteis = [
       'preciso',
       'quero',
@@ -401,19 +400,6 @@ export class ChatbotContext {
       return 'Por favor, seja mais específico no nome do produto.';
     }
 
-    const searchKey = termos.join('-');
-    const cacheKey = `chatbot:busca:isolada:${searchKey}`;
-
-    try {
-      const cached = await redis.get(cacheKey);
-      if (cached) {
-        console.log(`⚡ [Redis] Retornando busca por "${searchKey}" do Cache!`);
-        return cached;
-      }
-    } catch (err) {
-      console.error('⚠️ [Redis Error] Falha ao ler cache, buscando no DB...', err);
-    }
-
     const condicoesAND = termos.map((termo) => ({
       OR: [
         { name: { contains: termo, mode: 'insensitive' as const } },
@@ -421,123 +407,29 @@ export class ChatbotContext {
       ],
     }));
 
+    // Busca no banco (Trazemos até 40 opções para a IA analisar)
     const products = await prisma.product.findMany({
       where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
-      select: { name: true, price: true, categories: { select: { name: true } } },
+      take: 40,
+      select: { name: true, price: true },
     });
 
     if (products.length === 0) {
       return `Não encontrei produtos exatamente para "${termoBusca}".`;
     }
 
-    // 1. Agrupamento Dinâmico por Similaridade (CORRIGIDO: normalização + denominador mínimo)
-    const grupos: { nomeOriginal: string; baseName: string; itens: any[] }[] = [];
-
-    for (const p of products) {
-      const palavrasP = this.normalizarPalavras(p.name);
-      let encontrouGrupo = false;
-
-      for (const grupo of grupos) {
-        const palavrasGrupo = this.normalizarPalavras(grupo.nomeOriginal);
-
-        const palavrasComuns = palavrasP.filter((palavra: string) =>
-          palavrasGrupo.includes(palavra),
-        );
-
-        const menorTamanho = Math.min(palavrasP.length, palavrasGrupo.length);
-
-        const categoriasBatem = this.mesmasCategorias(p.categories, grupo.itens[0].categories);
-
-        // Usa o MENOR nome como base — evita que sabores compostos ("Frutas Vermelhas")
-        // percam pra sabores de uma palavra só ("Chocolate")
-        if (categoriasBatem && menorTamanho > 0 && palavrasComuns.length / menorTamanho >= 0.6) {
-          // Nome base = palavras comuns, na ordem original (usando o nome original do grupo pra exibir bonito)
-          const palavrasGrupoOriginal = grupo.nomeOriginal.split(' ');
-          const palavrasComunsOriginal = palavrasGrupoOriginal.filter((palavraOrig: string) => {
-            const norm = palavraOrig
-              .normalize('NFD')
-              .replace(/[\u0300-\u036f]/g, '')
-              .toLowerCase();
-            return (
-              palavrasComuns.includes(norm) ||
-              (/^\d+[a-z]*$/.test(norm) === false && palavrasComuns.includes(norm))
-            );
-          });
-
-          grupo.baseName =
-            palavrasComunsOriginal.length > 0 ? palavrasComunsOriginal.join(' ') : grupo.baseName;
-
-          // Sabor = palavras normalizadas que sobraram, mas exibindo a versão original
-          const palavrasPOriginal = p.name.split(' ');
-          const saborP = palavrasPOriginal
-            .filter((palavraOrig: string) => {
-              const norm = palavraOrig
-                .normalize('NFD')
-                .replace(/[\u0300-\u036f]/g, '')
-                .toLowerCase();
-              return !palavrasComuns.includes(norm);
-            })
-            .join(' ');
-
-          if (grupo.itens.length === 1) {
-            const palavrasItem1Original = grupo.itens[0].name.split(' ');
-            const saborItem1 = palavrasItem1Original
-              .filter((palavraOrig: string) => {
-                const norm = palavraOrig
-                  .normalize('NFD')
-                  .replace(/[\u0300-\u036f]/g, '')
-                  .toLowerCase();
-                return !palavrasComuns.includes(norm);
-              })
-              .join(' ');
-            grupo.itens[0].flavor = saborItem1 || 'Tradicional';
-          }
-
-          grupo.itens.push({ ...p, flavor: saborP || 'Tradicional' });
-          encontrouGrupo = true;
-          break;
-        }
-      }
-
-      if (!encontrouGrupo) {
-        grupos.push({ nomeOriginal: p.name, baseName: p.name, itens: [{ ...p, flavor: '' }] });
-      }
-    }
-
-    // 2. Montando a visualização e o Cache para o Redis
-    let text = `Encontrei essas opções pra você 👇\n\n`;
-    let contador = 1;
-    const nomesParaRedis: string[] = [];
-
-    grupos.forEach((grupo) => {
-      if (grupo.itens.length === 1) {
-        text += `*${contador}. ${grupo.itens[0].name}*\n💰 R$ ${Number(grupo.itens[0].price).toFixed(2)}\n\n`;
-        nomesParaRedis.push(grupo.itens[0].name);
-        contador++;
-      } else {
-        const listaSabores = grupo.itens
-          .map((i) => {
-            const s = i.flavor || 'Original';
-            return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
-          })
-          .join(', ');
-
-        text += `*${contador}. ${grupo.baseName}*\n🎨 Sabores: ${listaSabores}\n💰 R$ ${Number(grupo.itens[0].price).toFixed(2)}\n\n`;
-
-        nomesParaRedis.push(grupo.baseName);
-        grupo.itens.forEach((i) => nomesParaRedis.push(i.name));
-
-        contador++;
-      }
+    // 2. Entrega a lista crua e deixa a IA agrupar mentalmente!
+    let text = `[RESULTADOS DO BANCO DE DADOS]\n`;
+    products.forEach((p) => {
+      text += `- ${p.name} | R$ ${Number(p.price).toFixed(2)}\n`;
     });
 
-    text += `_Qual desses te interessou? Me fala o nome do produto ou o número!_`;
-
-    try {
-      await redis.set(cacheKey, text, 'EX', 1800);
-    } catch (err) {
-      console.error('⚠️ [Redis Error] Falha ao salvar cache:', err);
-    }
+    text += `\n⚠️ INSTRUÇÃO OBRIGATÓRIA PARA A IA: 
+1. Analise os produtos acima e AGRUPE-OS por marca e linha (ex: "Whey Protein Concentrado Dux").
+2. NÃO liste cada sabor individualmente. Oculte a informação de sabor na listagem inicial.
+3. FILTRE E OCULTE produtos como "Sachês", "Amostras" ou de gramaturas pequenas (ex: 34g), a menos que o cliente tenha pedido especificamente por sachês.
+4. Apresente para o cliente uma lista limpa, curta e numerada. Exemplo: "1. Whey Concentrado Dux - R$ 250.00".
+5. Pergunte qual número ele escolhe.`;
 
     return text;
   }
