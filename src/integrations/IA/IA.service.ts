@@ -561,7 +561,7 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
         function: {
           name: 'ver_detalhes_do_produto',
           description:
-            'OBRIGATÓRIO: Use para exibir os detalhes, foto e botões de um produto. ⚠️ REGRA ANTI-ALUCINAÇÃO: Se o cliente escolher um número ou produto genérico, CHAME ESSA FERRAMENTA PRIMEIRO com o nome base (ex: "Isofort"). Ela devolverá os sabores reais disponíveis no banco. NUNCA adivinhe ou invente sabores! Só repasse os dados que essa ferramenta devolver. NUNCA passe apenas números no argumento.',
+            'OBRIGATÓRIO: Use para exibir os detalhes, foto e botões de compra. ⚠️ REGRA ABSOLUTA: Se o cliente escolher um NÚMERO da lista (ex: "7"), OLHE O SEU HISTÓRICO, descubra qual é o NOME do produto correspondente a esse número e passe O NOME COMPLETO AQUI (ex: "Creatine Pura Black Skull"). Nunca passe o número puro no argumento! É ESTRITAMENTE PROIBIDO confirmar a escolha do cliente usando texto normal, chame a ferramenta primeiro!',
           parameters: {
             type: 'object',
             properties: { nome_produto: { type: 'string' } },
@@ -665,7 +665,14 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
     // ─── 4. Lógica de Trava da Busca (Mágica Ocorre Aqui) ───
     let forcedTool: any = 'auto';
     let forcedTemperature = config?.temperature ?? 0.7;
-    let overrideDetalhesName: string | null = null; // 👈 NOVA Variável para blindar o argumento
+    let overrideDetalhesName: string | null = null;
+
+    const msgLimpa = userMessage.toLowerCase().trim();
+    // Verifica se o cliente mandou só o número (ex: "7", "quero o 7", "opcao 7")
+    const isApenasNumero =
+      /^\d+$/.test(msgLimpa) ||
+      /^quero (o|a) \d+$/.test(msgLimpa) ||
+      /^op[cç][aã]o \d+$/.test(msgLimpa);
 
     if (userMessage.includes('[FORCAR_BUSCA]')) {
       forcedTool = { type: 'function', function: { name: 'listar_produtos' } };
@@ -674,11 +681,26 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
       forcedTool = { type: 'function', function: { name: 'ver_detalhes_do_produto' } };
       forcedTemperature = 0;
 
-      // Extrai o nome EXATO do produto gerado pelo Worker
       const match = userMessage.match(/\[FORCAR_DETALHES:(.*?)\]/);
       if (match) {
         overrideDetalhesName = match[1].trim();
       }
+    } else if (isApenasNumero) {
+      // 🛡️ MÁGICA 1: OBRIGA a IA a chamar a ferramenta!
+      // Ela não vai conseguir responder com texto. Ela será obrigada a ler o histórico sozinha,
+      // converter o "7" no nome do produto e acionar a busca da foto/botões.
+      forcedTool = { type: 'function', function: { name: 'ver_detalhes_do_produto' } };
+      forcedTemperature = 0;
+    }
+
+    // 🛡️ MÁGICA 2: Ameaça a IA caso o cliente tenha digitado um sabor curto (ex: "chocolate")
+    const palavrasCurtas = msgLimpa.split(' ').length;
+    if (palavrasCurtas <= 3 && !isApenasNumero && !userMessage.includes('[')) {
+      messages.push({
+        role: 'system',
+        content:
+          '⚠️ ALERTA DE SEGURANÇA MÁXIMA: O cliente enviou uma resposta curta. Se essa resposta for a ESCOLHA de um produto ou sabor da lista, VOCÊ É ESTRITAMENTE OBRIGADA a chamar a ferramenta "ver_detalhes_do_produto" enviando o nome completo do item. É TOTALMENTE PROIBIDO confirmar a escolha apenas conversando em texto.',
+      });
     }
 
     // ─── 5. Chama a API da OpenAI UMA ÚNICA VEZ para pegar a resposta/tool ───
