@@ -425,11 +425,20 @@ export class ChatbotContext {
     });
 
     text += `\n⚠️ INSTRUÇÃO OBRIGATÓRIA PARA A IA: 
-1. Analise os produtos acima e AGRUPE-OS por marca e linha (ex: "Whey Protein Concentrado Dux").
-2. NÃO liste cada sabor individualmente. Oculte a informação de sabor na listagem inicial.
-3. FILTRE E OCULTE produtos como "Sachês", "Amostras" ou de gramaturas pequenas (ex: 34g), a menos que o cliente tenha pedido especificamente por sachês.
-4. Apresente para o cliente uma lista limpa, curta e numerada. Exemplo: "1. Whey Concentrado Dux - R$ 250.00".
-5. Pergunte qual número ele escolhe.`;
+1. Analise os produtos brutos acima e AGRUPE-OS de forma inteligente por Marca e Linha (ex: "Whey Protein Concentrado Dux", "Whey 100 Pure Integral Medica"). Não misture marcas diferentes no mesmo número.
+2. 🚫 FILTRE E OCULTE produtos como "Sachês", "Amostras" ou gramaturas pequenas (ex: 34g, 30g), a menos que o cliente os tenha pedido.
+3. Extraia os sabores reais de cada item. Remova palavras feias do banco (como "sabor", "pote", "refil", etc).
+4. Formate a lista ESTRITAMENTE neste padrão visual (use os exatos emojis):
+
+*1. [Nome da Marca e Linha]*
+🎨 Sabores: [Sabor 1], [Sabor 2], [Sabor 3]
+💰 R$ [Preço]
+
+*2. [Próxima Marca e Linha]*
+💰 R$ [Preço]
+
+(Obs: Se houver apenas 1 opção sem variação de sabor, não coloque a linha "🎨 Sabores").
+5. No final da lista, pergunte: "Qual desses te interessou? Me fala o nome do produto ou o número! 😊"`;
 
     return text;
   }

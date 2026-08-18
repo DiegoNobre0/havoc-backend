@@ -469,9 +469,14 @@ ETAPA 3 — APRESENTAÇÃO:
 - EXPERIENTE: "Massa! Você tem preferência por alguma marca ou quer ver nossas opções?" -> Após resposta, chame 'listar_produtos' COMBINANDO produto e marca.
 - INICIANTE: Diga: "Para começar certo, o ideal é: 💪 Whey e ⚡ Creatina. Posso te mostrar as opções?" -> Se "Sim", busque o produto.
 
-ETAPA 4 — DETALHES E BOTÕES:
-Se o cliente escolheu um produto (seja pelo número, nome ou APENAS O SABOR), ⚠️ É TOTALMENTE PROIBIDO descrever o produto da sua memória. Chame a ferramenta 'ver_detalhes_do_produto' AGORA. 
-REGRA PARA NÚMEROS: Se o cliente digitar apenas um número (ex: "1" ou "quero o 2"), olhe na última lista que VOCÊ MESMA enviou, veja qual é o NOME BASE do produto que corresponde a esse número e mande esse nome exato para a ferramenta 'ver_detalhes_do_produto'.
+ETAPA 4 — DETALHES E BOTÕES (A REGRA MAIS IMPORTANTE):
+⚠️ ALERTA DE ALUCINAÇÃO: É ESTRITAMENTE PROIBIDO adivinhar sabores ou gerar resumos da sua cabeça. Você DEVE usar a ferramenta!
+Quando o cliente escolher um número da lista ou o nome do produto, siga OBRIGATORIAMENTE estes passos na exata ordem:
+1. Converta o número escolhido para o NOME do produto correspondente na sua lista (ex: "1" = "Whey Dux"). NUNCA envie o número puro para a ferramenta.
+2. Chame a ferramenta 'ver_detalhes_do_produto' IMEDIATAMENTE usando o NOME BASE (ex: "Isofort"). NÃO pergunte o sabor ainda! Deixe a ferramenta consultar o estoque primeiro.
+3. Se a ferramenta retornar [MULTIPLAS_OPCOES], leia a lista de sabores REAIS que o banco devolveu e aí sim pergunte ao cliente qual ele prefere (ex: "Temos Chocolate e Neutro. Qual prefere?").
+4. Quando ele responder o sabor, chame a ferramenta NOVAMENTE com o nome completo (ex: "Isofort Chocolate") para renderizar a FOTO e os BOTÕES. Nunca pule essa chamada!
+
 ETAPA 5 — UPSELL:
 Siga a instrução invisível para sugerir complemento.
 
@@ -557,7 +562,7 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
         function: {
           name: 'ver_detalhes_do_produto',
           description:
-            'OBRIGATÓRIO: Use para exibir os detalhes de um produto. ⚠️ REGRA ABSOLUTA: Passe o NOME COMPLETO do produto (Nome + Marca + Sabor). Se o cliente citar apenas um sabor (ex: "Chocolate"), VERIFIQUE O HISTÓRICO para saber de qual produto ele está falando e junte tudo (ex: "Whey 100 Pure Integral Medica Chocolate"). É estritamente proibido passar apenas o sabor ou apenas números.',
+            'OBRIGATÓRIO: Use para exibir os detalhes, foto e botões de um produto. ⚠️ REGRA ANTI-ALUCINAÇÃO: Se o cliente escolher um número ou produto genérico, CHAME ESSA FERRAMENTA PRIMEIRO com o nome base (ex: "Isofort"). Ela devolverá os sabores reais disponíveis no banco. NUNCA adivinhe ou invente sabores! Só repasse os dados que essa ferramenta devolver. NUNCA passe apenas números no argumento.',
           parameters: {
             type: 'object',
             properties: { nome_produto: { type: 'string' } },
