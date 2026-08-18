@@ -410,7 +410,7 @@ export class ChatbotContext {
     // Busca no banco (Trazemos até 40 opções para a IA analisar)
     const products = await prisma.product.findMany({
       where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
-      take: 40,
+      orderBy: { name: 'asc' }, // 👉 Ajuda a IA a ler os itens já agrupados!
       select: { name: true, price: true },
     });
 
@@ -418,27 +418,28 @@ export class ChatbotContext {
       return `Não encontrei produtos exatamente para "${termoBusca}".`;
     }
 
-    // 2. Entrega a lista crua e deixa a IA agrupar mentalmente!
+    // 2. Entrega a lista crua e deixa a IA agrupar e embelezar!
     let text = `[RESULTADOS DO BANCO DE DADOS]\n`;
     products.forEach((p) => {
       text += `- ${p.name} | R$ ${Number(p.price).toFixed(2)}\n`;
     });
 
-    text += `\n⚠️ INSTRUÇÃO OBRIGATÓRIA PARA A IA: 
-1. Analise os produtos brutos acima e AGRUPE-OS de forma inteligente por Marca e Linha (ex: "Whey Protein Concentrado Dux", "Whey 100 Pure Integral Medica"). Não misture marcas diferentes no mesmo número.
+    text += `\n⚠️ INSTRUÇÃO OBRIGATÓRIA PARA A IA (LEIA COM ATENÇÃO): 
+1. Analise TODOS os produtos brutos acima e AGRUPE-OS de forma inteligente por Marca e Linha (ex: "Whey Protein Concentrado Dux", "Whey 100 Pure Integral Medica"). Não misture marcas diferentes no mesmo número.
 2. 🚫 FILTRE E OCULTE produtos como "Sachês", "Amostras" ou gramaturas pequenas (ex: 34g, 30g), a menos que o cliente os tenha pedido.
-3. Extraia os sabores reais de cada item. Remova palavras feias do banco (como "sabor", "pote", "refil", etc).
-4. Formate a lista ESTRITAMENTE neste padrão visual (use os exatos emojis):
+3. Extraia TODOS os sabores de cada item. ⚠️ REGRA CRÍTICA: É ESTRITAMENTE PROIBIDO omitir ou esconder qualquer sabor que o banco retornou! Liste absolutamente todos os sabores disponíveis para cada linha.
+4. Remova palavras feias do banco (como "sabor", "pote", "refil", "un", etc).
+5. Formate a lista ESTRITAMENTE neste padrão visual (use os exatos emojis):
 
 *1. [Nome da Marca e Linha]*
-🎨 Sabores: [Sabor 1], [Sabor 2], [Sabor 3]
+🎨 Sabores: [Sabor 1], [Sabor 2], [Sabor 3], [Sabor 4]...
 💰 R$ [Preço]
 
 *2. [Próxima Marca e Linha]*
 💰 R$ [Preço]
 
 (Obs: Se houver apenas 1 opção sem variação de sabor, não coloque a linha "🎨 Sabores").
-5. No final da lista, pergunte: "Qual desses te interessou? Me fala o nome do produto ou o número! 😊"`;
+6. No final da lista, pergunte: "Qual desses te interessou? Me fala o nome do produto ou o número! 😊"`;
 
     return text;
   }
