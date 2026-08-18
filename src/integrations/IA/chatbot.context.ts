@@ -425,11 +425,12 @@ export class ChatbotContext {
     });
 
     text += `\n⚠️ INSTRUÇÃO OBRIGATÓRIA PARA A IA (LEIA COM ATENÇÃO): 
-1. Analise TODOS os produtos brutos acima e AGRUPE-OS de forma inteligente por Marca e Linha (ex: "Whey Protein Concentrado Dux"). Não misture marcas diferentes no mesmo número.
+1. Analise TODOS os produtos brutos acima e AGRUPE-OS de forma inteligente por Marca e Linha (ex: "Whey Protein Concentrado Dux", "Whey 100 Pure Integral Medica").
 2. 🚫 FILTRE E OCULTE produtos como "Sachês", "Amostras" ou gramaturas pequenas (ex: 34g, 30g), a menos que o cliente os tenha pedido.
-3. Extraia TODOS os sabores. ⚠️ REGRA CRÍTICA: É ESTRITAMENTE PROIBIDO omitir ou esconder qualquer sabor que o banco retornou!
-4. Remova palavras de estoque (como "sabor", "pote", "refil", "un"). ⚠️ REGRA VITAL DE ORTOGRAFIA: MANTENHA A GRAFIA DAS MARCAS EXATAMENTE COMO VIERAM DO BANCO DE DADOS! NUNCA adicione letras extras (Ex: Se no banco está "NUTRATA", é estritamente proibido escrever "Nutratta" com dois T). Se você errar a grafia, o sistema quebra.
-5. Formate a lista ESTRITAMENTE neste padrão visual (use os exatos emojis):
+3. Extraia TODOS os sabores. É ESTRITAMENTE PROIBIDO omitir qualquer sabor.
+4. ⚠️ REGRA CRÍTICA DE QUANTIDADE: NÃO RESUMA A LISTA! Você é OBRIGADA a exibir TODAS as marcas e linhas que o banco de dados retornou. Se o banco retornou 15 marcas diferentes, sua lista DEVE ter os 15 itens. É terminantemente proibido encurtar a lista para economizar texto.
+5. ⚠️ REGRA VITAL DE ORTOGRAFIA: MANTENHA A GRAFIA EXATA DOS NOMES COMO VIERAM DO BANCO.
+6. Formate a lista ESTRITAMENTE neste padrão visual (use os exatos emojis):
 
 *1. [Nome da Marca e Linha]*
 🎨 Sabores: [Sabor 1], [Sabor 2], [Sabor 3]
@@ -439,9 +440,8 @@ export class ChatbotContext {
 💰 R$ [Preço]
 
 (Obs: Se houver apenas 1 opção sem variação de sabor, não coloque a linha "🎨 Sabores").
-6. No final da lista, pergunte: "Qual desses te interessou? Me fala o nome do produto ou o número! 😊"`;
+7. No final da lista, pergunte: "Qual desses te interessou? Me fala o nome do produto ou o número! 😊"`;
 
-    return text;
     return text;
   }
 
