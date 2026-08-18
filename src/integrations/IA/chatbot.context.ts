@@ -424,14 +424,14 @@ export class ChatbotContext {
       text += `- ${p.name} | R$ ${Number(p.price).toFixed(2)}\n`;
     });
 
-    text += `\n⚠️ INSTRUÇÃO OBRIGATÓRIA PARA A IA (LEIA COM ATENÇÃO): 
-🚨 OVERRIDE DE SISTEMA: Para esta resposta, IGNORE SUA REGRA DE MENSAGENS CURTAS. Você está liberada para gerar um texto longo.
+    text += `\n⚠️ INSTRUÇÃO DE SEGURANÇA MÁXIMA PARA A IA (LEI DE SOBREVIVÊNCIA): 
+🚨 OVERRIDE DE SISTEMA: IGNORE A REGRA DE MENSAGENS CURTAS. É OBRIGATÓRIO GERAR UMA LISTA LONGA E COMPLETA.
 1. 🎯 OBRIGAÇÃO DE AGRUPAMENTO: Você DEVE unir produtos da mesma Marca, Linha e Gramatura em um ÚNICO número, extraindo os sabores para a linha debaixo.
    - ❌ ERRADO: 1. Whey Dux Morango | 2. Whey Dux Chocolate
    - ✅ CERTO: 1. Whey Concentrado Dux 900g | 🎨 Sabores: Morango, Chocolate
 2. 🚫 FILTRE E OCULTE produtos como "Sachês", "Amostras" ou de 34g/30g, a menos que o cliente os tenha pedido.
 3. Extraia TODOS os sabores. É ESTRITAMENTE PROIBIDO omitir qualquer sabor retornado pelo banco na linha "🎨 Sabores". 
-4. ⚠️ CLAREZA SOBRE QUANTIDADE: Agrupar sabores NÃO é resumir! Exiba absolutamente TODAS as marcas, linhas e gramaturas diferentes que sobraram após o filtro de sachês. Nenhuma marca ou variação de peso pode ficar de fora.
+4. ⚠️ REGRA ANTI-PREGUIÇA (CRÍTICA): Você sofre de "Lazy Generation" e corta listas no meio para economizar texto. Você está TERMINANTEMENTE PROIBIDA de fazer isso! Agrupar sabores NÃO é resumir! Exiba absolutamente TODAS as marcas, linhas e gramaturas diferentes que sobraram após o filtro. Se o banco retornou 20, 30 ou mais produtos diferentes, VOCÊ É OBRIGADA A IMPRIMIR TODOS ELES. Não pare de gerar a lista e não encerre a mensagem até que 100% dos produtos do banco tenham sido exibidos na tela.
 5. Formate a lista ESTRITAMENTE neste padrão visual (use os exatos emojis):
 
 *1. [Nome da Marca, Linha e Peso (ex: B.O.P.E 300g Black Skull)]*

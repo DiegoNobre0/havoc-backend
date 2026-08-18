@@ -754,6 +754,7 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
       const finalResponse = await openai.chat.completions.create({
         model: this.model,
         messages,
+        temperature: 0.1,
       });
 
       totalTokens += finalResponse.usage?.total_tokens ?? 0;
