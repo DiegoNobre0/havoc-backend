@@ -561,7 +561,7 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
         function: {
           name: 'ver_detalhes_do_produto',
           description:
-            'OBRIGATÓRIO: Use para exibir os detalhes, foto e botões de compra. ⚠️ REGRA ABSOLUTA: Se o cliente escolher um NÚMERO da lista (ex: "7"), OLHE O SEU HISTÓRICO, descubra qual é o NOME do produto correspondente a esse número e passe O NOME COMPLETO AQUI (ex: "Creatine Pura Black Skull"). Nunca passe o número puro no argumento! É ESTRITAMENTE PROIBIDO confirmar a escolha do cliente usando texto normal, chame a ferramenta primeiro!',
+            'OBRIGATÓRIO: Use para exibir detalhes e gerar botões. ⚠️ REGRA ABSOLUTA E VITAL: Ao passar o argumento "nome_produto", você DEVE COPIAR o nome exato e original do produto como ele apareceu no bloco [RESULTADOS DO BANCO DE DADOS]. É estritamente proibido passar o nome modificado, embelezado ou inventado que você enviou ao cliente. Vá na sua memória, olhe como o banco escreveu, e passe aquela string inteira (ex: "CREATINA 300G REFIL NUTRATA" e nunca "Creatina Nutratta").',
           parameters: {
             type: 'object',
             properties: { nome_produto: { type: 'string' } },

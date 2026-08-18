@@ -425,14 +425,14 @@ export class ChatbotContext {
     });
 
     text += `\n⚠️ INSTRUÇÃO OBRIGATÓRIA PARA A IA (LEIA COM ATENÇÃO): 
-1. Analise TODOS os produtos brutos acima e AGRUPE-OS de forma inteligente por Marca e Linha (ex: "Whey Protein Concentrado Dux", "Whey 100 Pure Integral Medica"). Não misture marcas diferentes no mesmo número.
+1. Analise TODOS os produtos brutos acima e AGRUPE-OS de forma inteligente por Marca e Linha (ex: "Whey Protein Concentrado Dux"). Não misture marcas diferentes no mesmo número.
 2. 🚫 FILTRE E OCULTE produtos como "Sachês", "Amostras" ou gramaturas pequenas (ex: 34g, 30g), a menos que o cliente os tenha pedido.
-3. Extraia TODOS os sabores de cada item. ⚠️ REGRA CRÍTICA: É ESTRITAMENTE PROIBIDO omitir ou esconder qualquer sabor que o banco retornou! Liste absolutamente todos os sabores disponíveis para cada linha.
-4. Remova palavras feias do banco (como "sabor", "pote", "refil", "un", etc).
+3. Extraia TODOS os sabores. ⚠️ REGRA CRÍTICA: É ESTRITAMENTE PROIBIDO omitir ou esconder qualquer sabor que o banco retornou!
+4. Remova palavras de estoque (como "sabor", "pote", "refil", "un"). ⚠️ REGRA VITAL DE ORTOGRAFIA: MANTENHA A GRAFIA DAS MARCAS EXATAMENTE COMO VIERAM DO BANCO DE DADOS! NUNCA adicione letras extras (Ex: Se no banco está "NUTRATA", é estritamente proibido escrever "Nutratta" com dois T). Se você errar a grafia, o sistema quebra.
 5. Formate a lista ESTRITAMENTE neste padrão visual (use os exatos emojis):
 
 *1. [Nome da Marca e Linha]*
-🎨 Sabores: [Sabor 1], [Sabor 2], [Sabor 3], [Sabor 4]...
+🎨 Sabores: [Sabor 1], [Sabor 2], [Sabor 3]
 💰 R$ [Preço]
 
 *2. [Próxima Marca e Linha]*
@@ -441,6 +441,7 @@ export class ChatbotContext {
 (Obs: Se houver apenas 1 opção sem variação de sabor, não coloque a linha "🎨 Sabores").
 6. No final da lista, pergunte: "Qual desses te interessou? Me fala o nome do produto ou o número! 😊"`;
 
+    return text;
     return text;
   }
 
@@ -540,10 +541,49 @@ export class ChatbotContext {
       });
       if (prodEncontrado) return formatarProduto(prodEncontrado);
     } else {
-      const produtosEncontrados = await prisma.product.findMany({
+      // 1. Tenta a Busca Estrita (Todas as palavras precisam bater)
+      let produtosEncontrados = await prisma.product.findMany({
         where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
       });
+
+      // 🛡️ 2. O SALVA-VIDAS UNIVERSAL (Fuzzy Search Flexível)
+      // Se não achou nada, a IA pode ter inventado uma palavra ou digitado errado.
+      if (produtosEncontrados.length === 0 && termos.length > 1) {
+        // Muda de AND para OR (Busca produtos que tenham pelo menos uma das palavras)
+        const condicoesOR = termos.map((termo: string) => ({
+          name: { contains: termo, mode: 'insensitive' as const },
+        }));
+
+        const produtosPossiveis = await prisma.product.findMany({
+          where: { isActive: true, stock: { gt: 0 }, OR: condicoesOR },
+        });
+
+        if (produtosPossiveis.length > 0) {
+          // Calcula um "Score de Relevância" para cada produto encontrado
+          produtosPossiveis.sort((a, b) => {
+            const nomeA = a.name.toLowerCase();
+            const nomeB = b.name.toLowerCase();
+            // Conta quantas palavras da pesquisa existem no nome do produto
+            const scoreA = termos.filter((t) => nomeA.includes(t)).length;
+            const scoreB = termos.filter((t) => nomeB.includes(t)).length;
+            return scoreB - scoreA; // Ordena do maior pro menor
+          });
+
+          // Pega o score mais alto (o produto mais parecido com o que a IA digitou)
+          const melhorScore = termos.filter((t) =>
+            produtosPossiveis[0].name.toLowerCase().includes(t),
+          ).length;
+
+          // Mantém apenas os produtos que empataram no topo da relevância
+          produtosEncontrados = produtosPossiveis.filter(
+            (p) => termos.filter((t) => p.name.toLowerCase().includes(t)).length === melhorScore,
+          );
+        }
+      }
+
+      // 3. Continua o fluxo normal de exibir o resultado
       if (produtosEncontrados.length > 1) {
+        // Encontrou o produto, mas tem variações/sabores
         const listaOpcoes = produtosEncontrados
           .map((p, index) => `${index + 1}. ${p.name}`)
           .join('\n');
