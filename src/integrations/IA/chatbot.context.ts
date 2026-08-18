@@ -426,22 +426,22 @@ export class ChatbotContext {
 
     text += `\n⚠️ INSTRUÇÃO OBRIGATÓRIA PARA A IA (LEIA COM ATENÇÃO): 
 🚨 OVERRIDE DE SISTEMA: Para esta resposta, IGNORE SUA REGRA DE MENSAGENS CURTAS. Você está liberada para gerar um texto longo.
-1. Analise TODOS os produtos brutos acima e AGRUPE-OS de forma inteligente por Marca e Linha.
-2. 🚫 FILTRE E OCULTE produtos como "Sachês", "Amostras" ou gramaturas pequenas (ex: 34g, 30g), a menos que o cliente os tenha pedido.
-3. Extraia TODOS os sabores de cada item. É ESTRITAMENTE PROIBIDO omitir qualquer sabor retornado pelo banco.
-4. ⚠️ REGRA CRÍTICA DE QUANTIDADE: NÃO RESUMA A LISTA! Se o banco retornou 15 marcas diferentes, sua lista final DEVE ter exatamente 15 itens numerados. Transcreva ABSOLUTAMENTE TUDO o que sobrou após filtrar os sachês.
-5. ⚠️ REGRA VITAL DE ORTOGRAFIA: MANTENHA A GRAFIA EXATA DOS NOMES COMO VIERAM DO BANCO.
-6. Formate a lista ESTRITAMENTE neste padrão visual (use os exatos emojis):
+1. Analise TODOS os produtos brutos acima e AGRUPE-OS de forma inteligente por Marca, Linha E GRAMATURA. 
+⚠️ REGRA DE PESO: Variações de tamanho (ex: 150g e 300g) SÃO PRODUTOS DIFERENTES e devem ficar em números separados na lista! NUNCA remova a gramatura/peso do nome do produto.
+2. 🚫 FILTRE E OCULTE produtos como "Sachês", "Amostras" ou de 34g/30g, a menos que o cliente os tenha pedido.
+3. Extraia TODOS os sabores de cada item. É ESTRITAMENTE PROIBIDO omitir qualquer sabor retornado pelo banco (se o banco trouxe Neutro, Chocolate e Morango, os três devem aparecer na linha de sabores). 
+4. ⚠️ REGRA CRÍTICA DE QUANTIDADE: NÃO RESUMA A LISTA! Liste absolutamente todas as variações e marcas.
+5. Formate a lista ESTRITAMENTE neste padrão visual (use os exatos emojis):
 
-*1. [Nome da Marca e Linha]*
+*1. [Nome da Marca, Linha e Peso (ex: B.O.P.E 300g Black Skull)]*
 🎨 Sabores: [Sabor 1], [Sabor 2], [Sabor 3]
 💰 R$ [Preço]
 
-*2. [Próxima Marca e Linha]*
+*2. [Próxima Marca, Linha e Peso]*
 💰 R$ [Preço]
 
 (Obs: Se houver apenas 1 opção sem variação de sabor, não coloque a linha "🎨 Sabores").
-7. No final da lista, pergunte: "Qual desses te interessou? Me fala o nome do produto ou o número! 😊"`;
+6. No final da lista, pergunte: "Qual desses te interessou? Me fala o nome do produto ou o número! 😊"`;
 
     return text;
   }
