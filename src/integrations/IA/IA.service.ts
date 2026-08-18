@@ -75,8 +75,8 @@ export class IAService {
         } else if (rawResult.includes('[MULTIPLAS_OPCOES]')) {
           result = `${rawResult}\n\n⚠️ INSTRUÇÃO DO SISTEMA (LEIA COM ATENÇÃO):
           O cliente escolheu um produto que possui vários sabores ou variações de marca.
-          Apresente as opções listadas acima de forma AMIGÁVEL, RESUMIDA e FÁCIL DE LER.
-          Pergunte qual dessas opções ele prefere. 
+          Apresente as opções listadas acima de forma AMIGÁVEL, separando os sabores com NÚMEROS (1, 2, 3...) para facilitar a escolha do cliente.
+          Pergunte qual número da variação ele prefere. 
           🚫 TRAVA ESTRITA: É ESTRITAMENTE PROIBIDO tentar vender, emitir botões ou perguntar "Podemos adicionar ao carrinho?" nesta etapa.`;
 
           // CENÁRIO 3: PRODUTO ÚNICO (Exibe e tenta vender)
@@ -470,12 +470,11 @@ ETAPA 3 — APRESENTAÇÃO:
 - INICIANTE: Diga: "Para começar certo, o ideal é: 💪 Whey e ⚡ Creatina. Posso te mostrar as opções?" -> Se "Sim", busque o produto.
 
 ETAPA 4 — DETALHES E BOTÕES (A REGRA MAIS IMPORTANTE):
-⚠️ ALERTA DE ALUCINAÇÃO: É ESTRITAMENTE PROIBIDO adivinhar sabores ou gerar resumos da sua cabeça. Você DEVE usar a ferramenta!
-Quando o cliente escolher um número da lista ou o nome do produto, siga OBRIGATORIAMENTE estes passos na exata ordem:
+⚠️ TRAVA SUPREMA DE SEGURANÇA: Se o cliente escolheu um item da lista (seja pelo NÚMERO ou pelo NOME), É ESTRITAMENTE PROIBIDO responder apenas com texto comum. Você É OBRIGADA a acionar a ferramenta. Siga OBRIGATORIAMENTE estes passos:
 1. Converta o número escolhido para o NOME do produto correspondente na sua lista (ex: "1" = "Whey Dux"). NUNCA envie o número puro para a ferramenta.
-2. Chame a ferramenta 'ver_detalhes_do_produto' IMEDIATAMENTE usando o NOME BASE (ex: "Isofort"). NÃO pergunte o sabor ainda! Deixe a ferramenta consultar o estoque primeiro.
-3. Se a ferramenta retornar [MULTIPLAS_OPCOES], leia a lista de sabores REAIS que o banco devolveu e aí sim pergunte ao cliente qual ele prefere (ex: "Temos Chocolate e Neutro. Qual prefere?").
-4. Quando ele responder o sabor, chame a ferramenta NOVAMENTE com o nome completo (ex: "Isofort Chocolate") para renderizar a FOTO e os BOTÕES. Nunca pule essa chamada!
+2. Chame a ferramenta 'ver_detalhes_do_produto' IMEDIATAMENTE usando o NOME BASE. Não pergunte o sabor ainda, deixe a ferramenta bater no banco de dados primeiro!
+3. Se a ferramenta retornar [MULTIPLAS_OPCOES], liste os sabores com números e peça para o cliente escolher.
+4. Quando o cliente escolher o sabor, CHAME A FERRAMENTA NOVAMENTE com o nome completo do sabor para renderizar a FOTO e os BOTÕES interativos. 🚫 NUNCA tente vender sem chamar a ferramenta antes!
 
 ETAPA 5 — UPSELL:
 Siga a instrução invisível para sugerir complemento.

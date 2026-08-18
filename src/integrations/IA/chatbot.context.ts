@@ -544,7 +544,9 @@ export class ChatbotContext {
         where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
       });
       if (produtosEncontrados.length > 1) {
-        const listaOpcoes = produtosEncontrados.map((p) => `- ${p.name}`).join('\n');
+        const listaOpcoes = produtosEncontrados
+          .map((p, index) => `${index + 1}. ${p.name}`)
+          .join('\n');
         return `[MULTIPLAS_OPCOES]\nO item base "${nomeProduto}" foi encontrado, mas existem as seguintes variações no estoque:\n${listaOpcoes}`;
       } else if (produtosEncontrados.length === 1) {
         // Encontrou o produto exato e único!
