@@ -246,6 +246,11 @@ export class ChatbotContext {
         },
       });
 
+      await prisma.chatSession.update({
+        where: { sessionKey },
+        data: { status: 'AGUARDANDO_PAGAMENTO' },
+      });
+
       // 🔥 5. INTEGRAÇÃO MERCADO PAGO / SICREDI: Desativada temporariamente para testes 🔥
       let pixCopiaECola = '';
       let linkPagamento = '';
@@ -637,11 +642,8 @@ export class ChatbotContext {
         where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
       });
       if (produtosEncontrados.length > 1) {
-        // Encontrou o produto, mas tem vários sabores diferentes!
         const listaOpcoes = produtosEncontrados.map((p) => `- ${p.name}`).join('\n');
-        return `⚠️ O item base "${nomeProduto}" foi encontrado, mas existem múltiplas variações de sabor/tamanho.\n
-INSTRUÇÃO DE SISTEMA: Diga ao cliente que você encontrou o produto, MAS exija que ele escolha uma das opções abaixo antes de prosseguir. NÃO emita botões de confirmação ainda.\n
-Opções:\n${listaOpcoes}`;
+        return `[MULTIPLAS_OPCOES]\nO item base "${nomeProduto}" foi encontrado, mas existem as seguintes variações no estoque:\n${listaOpcoes}`;
       } else if (produtosEncontrados.length === 1) {
         // Encontrou o produto exato e único!
         return formatarProduto(produtosEncontrados[0]);

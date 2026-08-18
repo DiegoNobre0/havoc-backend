@@ -63,33 +63,38 @@ export class IAService {
           '\n\n⚠️ [INSTRUÇÃO DO SISTEMA]: Apresente os resultados de forma animada. ⚠️ REGRA ABSOLUTA: Repasse os produtos listados acima EXATAMENTE como estão, MANTENDO os números das opções (1., 2., etc) para o cliente poder escolher. NUNCA junte categorias ou altere a formatação.';
       } else if (name === 'ver_detalhes_do_produto') {
         const rawResult = await this.contextHelper.verDetalhesProduto(args.nome_produto);
-
         await this.chatbotService.updateSessionStatus(sessionKey, 'EM_ANDAMENTO');
 
-        // Se não encontrou o produto, avisa a IA e proíbe ela de tentar vender o fantasma
+        // CENÁRIO 1: FANTASMA (Não achou nada)
         if (rawResult.includes('não foi encontrado')) {
           result =
             rawResult +
             '\n\n⚠️ INSTRUÇÃO DO SISTEMA: O item buscado não foi encontrado no estoque. Avise o cliente de forma amigável e pergunte se ele quer ver outras opções. NÃO pergunte "o que achou desse?".';
+
+          // CENÁRIO 2: DESEMPATE (Tem vários sabores, o cliente precisa escolher um)
+        } else if (rawResult.includes('[MULTIPLAS_OPCOES]')) {
+          result = `${rawResult}\n\n⚠️ INSTRUÇÃO DO SISTEMA (LEIA COM ATENÇÃO):
+          O cliente escolheu um produto que possui vários sabores ou variações de marca.
+          Apresente as opções listadas acima de forma AMIGÁVEL, RESUMIDA e FÁCIL DE LER.
+          Pergunte qual dessas opções ele prefere. 
+          🚫 TRAVA ESTRITA: É ESTRITAMENTE PROIBIDO tentar vender, emitir botões ou perguntar "Podemos adicionar ao carrinho?" nesta etapa.`;
+
+          // CENÁRIO 3: PRODUTO ÚNICO (Exibe e tenta vender)
         } else {
-          // Lógica normal de exibir o produto
           const imgMatch = rawResult.match(/\[IMG:(.*?)\]/);
           const confirmMatch = rawResult.match(/\[CONFIRM:(.*?)\]/);
           if (imgMatch) extractedTags += `[IMG:${imgMatch[1]}]\n`;
           if (confirmMatch) extractedTags += `[CONFIRM:${confirmMatch[1]}]\n`;
 
-          // 1. Limpa as tags para a IA não vê-las
           const cleanProductData = rawResult
             .replace(/\[IMG:(.*?)\]/g, '')
             .replace(/\[CONFIRM:(.*?)\]/g, '')
             .trim();
 
-          // 2. Trava absoluta de comportamento
-          // 2. Trava absoluta de comportamento
           result = `${cleanProductData}\n\n⚠️ INSTRUÇÃO DO SISTEMA (LEIA COM ATENÇÃO):
           Sua tarefa agora é APENAS repassar os dados listados acima de forma animada.
           ⚠️ TRAVA ESTRITA 1: É TOTALMENTE PROIBIDO oferecer ou citar outros produtos agora.
-          ⚠️ TRAVA ESTRITA 2: É TOTALMENTE PROIBIDO iniciar o checkout (NÃO pergunte sobre retirada, entrega ou endereço de forma alguma).
+          ⚠️ TRAVA ESTRITA 2: É TOTALMENTE PROIBIDO iniciar o checkout (NÃO pergunte sobre retirada, entrega ou endereço).
           Termine a frase EXATAMENTE com a pergunta: "O que achou desse? Podemos adicionar ao carrinho?".`;
         }
       } else if (name === 'calcular_frete') {
