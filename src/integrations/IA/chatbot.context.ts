@@ -425,10 +425,11 @@ export class ChatbotContext {
     });
 
     text += `\n⚠️ INSTRUÇÃO OBRIGATÓRIA PARA A IA (LEIA COM ATENÇÃO): 
-1. Analise TODOS os produtos brutos acima e AGRUPE-OS de forma inteligente por Marca e Linha (ex: "Whey Protein Concentrado Dux", "Whey 100 Pure Integral Medica").
+🚨 OVERRIDE DE SISTEMA: Para esta resposta, IGNORE SUA REGRA DE MENSAGENS CURTAS. Você está liberada para gerar um texto longo.
+1. Analise TODOS os produtos brutos acima e AGRUPE-OS de forma inteligente por Marca e Linha.
 2. 🚫 FILTRE E OCULTE produtos como "Sachês", "Amostras" ou gramaturas pequenas (ex: 34g, 30g), a menos que o cliente os tenha pedido.
-3. Extraia TODOS os sabores. É ESTRITAMENTE PROIBIDO omitir qualquer sabor.
-4. ⚠️ REGRA CRÍTICA DE QUANTIDADE: NÃO RESUMA A LISTA! Você é OBRIGADA a exibir TODAS as marcas e linhas que o banco de dados retornou. Se o banco retornou 15 marcas diferentes, sua lista DEVE ter os 15 itens. É terminantemente proibido encurtar a lista para economizar texto.
+3. Extraia TODOS os sabores de cada item. É ESTRITAMENTE PROIBIDO omitir qualquer sabor retornado pelo banco.
+4. ⚠️ REGRA CRÍTICA DE QUANTIDADE: NÃO RESUMA A LISTA! Se o banco retornou 15 marcas diferentes, sua lista final DEVE ter exatamente 15 itens numerados. Transcreva ABSOLUTAMENTE TUDO o que sobrou após filtrar os sachês.
 5. ⚠️ REGRA VITAL DE ORTOGRAFIA: MANTENHA A GRAFIA EXATA DOS NOMES COMO VIERAM DO BANCO.
 6. Formate a lista ESTRITAMENTE neste padrão visual (use os exatos emojis):
 
