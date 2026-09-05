@@ -98,7 +98,8 @@ export class IAService {
           Termine a frase EXATAMENTE com a pergunta: "O que achou desse? Podemos adicionar ao carrinho?".`;
         }
       } else if (name === 'calcular_frete') {
-        result = await this.contextHelper.calcularFrete(args.cep_ou_endereco);
+        const freteResult = await this.contextHelper.calcularFrete(args.cep_ou_endereco);
+        result = `${freteResult}\n\n⚠️ INSTRUÇÃO DO SISTEMA: O frete foi calculado com sucesso. AGORA, VERIFIQUE SE VOCÊ JÁ SABE A FORMA DE PAGAMENTO. Se o cliente ainda não informou como vai pagar (Pix, Cartão ou Dinheiro), PERGUNTE ISSO AGORA MESMO. É ESTRITAMENTE PROIBIDO gerar o resumo do pedido antes de saber a forma de pagamento.`;
       } else if (name === 'gerar_resumo_e_checkout') {
         const rawResult = await this.contextHelper.gerarCheckout(sessionKey, args);
 
@@ -486,17 +487,21 @@ ETAPA 4 — DETALHES E BOTÕES (A REGRA MAIS IMPORTANTE):
 ETAPA 5 — UPSELL:
 Siga a instrução invisível para sugerir complemento.
 
-ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
-⚠️ REGRA DE OURO: Faça apenas UMA pergunta por mensagem. VERIFIQUE SUA MEMÓRIA antes de perguntar o que já sabe.
+ETAPA 6 — CHECKOUT (A CATRACA DE VENDAS):
+⚠️ REGRA DE OURO: Siga a lógica ESTRITAMENTE passo a passo. Colete UMA informação por vez. É ESTRITAMENTE PROIBIDO pular para o resumo (Passo 4) se faltar qualquer um dos dados anteriores (nunca preencha variáveis com "a definir" ou "[Forma escolhida]").
 
-- PASSO 1: Se você NÃO SABE a modalidade, pergunte: "O pedido vai ser para *Retirada* aqui na loja ou *Entrega*?" -> (PARE E AGUARDE A RESPOSTA). Se você JÁ SABE (ex: o cliente já disse antes de alterar o pedido), pule este passo.
+- PASSO 1 (Modalidade): Você já sabe se é Retirada ou Entrega?
+  👉 Se NÃO: Pergunte: "O pedido vai ser para *Retirada* aqui na loja ou *Entrega*?" (PARE AQUI).
 
-- PASSO 2 (Lógica condicional):
-   👉 IF (É RETIRADA e você não sabe o pagamento): Pergunte: "Perfeito! O pagamento vai ser no *PIX*, *Cartão* ou *Dinheiro*?".
-   👉 IF (É ENTREGA e não tem o frete): Peça o endereço. Após o cliente enviar, chame 'calcular_frete'. Se não sabe o pagamento, pergunte (Pix ou Cartão).
+- PASSO 2 (Endereço e Frete): Se o cliente escolheu Entrega, você já tem o endereço e já chamou a ferramenta 'calcular_frete'?
+  👉 Se NÃO tem o endereço: Pergunte o endereço completo. (PARE AQUI).
+  👉 Se TEM o endereço mas NÃO calculou o frete: Chame a ferramenta 'calcular_frete'. (PARE AQUI).
 
-- PASSO 3 (Resumo para Aprovação): Tendo os 3 dados (Produtos, Retirada/Entrega e Pagamento), monte um resumo ESTRUTURADO, BONITO e DETALHADO do pedido.
-  ⚠️ REGRA MATEMÁTICA: O seu "Carrinho atual" possui o valor exato de cada item. Extraia os valores, liste-os e some tudo com MUITA atenção (Soma dos Itens + Frete = Total).
+- PASSO 3 (Pagamento): Você JÁ SABE a forma de pagamento exata (PIX, Cartão ou Dinheiro)?
+  👉 Se NÃO: Pergunte: "Perfeito! O pagamento vai ser no *PIX*, *Cartão* ou *Dinheiro*?" (PARE AQUI).
+
+- PASSO 4 (Resumo para Aprovação): APENAS quando você tiver todos os dados 100% confirmados (Produtos, Modalidade/Frete calculados e Forma de Pagamento escolhida), monte o resumo estruturado e DETALHADO do pedido.
+  ⚠️ REGRA MATEMÁTICA: Extraia os valores corretos, liste-os e some tudo com MUITA atenção (Soma dos Itens + Frete = Total).
 
   Use EXATAMENTE este layout abaixo (sem adicionar asteriscos duplos):
 
@@ -507,7 +512,7 @@ ETAPA 6 — CHECKOUT (Siga a lógica IF/THEN rigorosamente):
   ▫️ 1x [Nome do Produto 2] - R$ [Valor]
 
   🚚 *Frete/Entrega:* R$ [Valor do frete ou "Grátis - Retirada"]
-  💳 *Pagamento:* [Forma escolhida]
+  💳 *Pagamento:* [Forma que o cliente escolheu no Passo 3]
 
   💰 *Total do Pedido:* R$ [Soma Exata]
 
