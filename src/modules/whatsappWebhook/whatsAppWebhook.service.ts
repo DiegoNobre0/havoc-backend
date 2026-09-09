@@ -128,6 +128,18 @@ export class WhatsAppWebhookService {
         msg.type = 'unknown';
     }
 
+    // 🔥 A MÁGICA DOS ANÚNCIOS AQUI 🔥
+    // Se a mensagem veio com o objeto 'referral', o cliente clicou num anúncio!
+    if (msg.referral && msg.referral.headline) {
+      const tituloAnuncio = msg.referral.headline;
+      const corpoAnuncio = msg.referral.body || '';
+
+      console.log(`[Webhook] 🎯 Lead de Anúncio detectado! Produto: ${tituloAnuncio}`);
+
+      // Injetamos a tag invisível para a Carol ativar o "Modo Vendedora de Anúncio"
+      content = `${content}\n\n[SISTEMA: O cliente acabou de clicar em um anúncio do produto: "${tituloAnuncio} - ${corpoAnuncio}". ATIVE O COMPORTAMENTO DE CLIENTES DE ANÚNCIOS: Receba-o com muita energia e puxe o assunto diretamente para mostrar as opções e detalhes desse produto específico, sem fazer perguntas genéricas do funil!]`;
+    }
+
     return {
       messageId: msg.id,
       phone: cleanPhone,

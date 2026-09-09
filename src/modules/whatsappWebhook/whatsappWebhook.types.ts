@@ -11,6 +11,15 @@ export interface WebhookMessagePayload {
     button_reply?: { id: string; title: string };
     list_reply?: { id: string; title: string; description?: string };
   };
+  // 👉 ADICIONADO: Objeto que recebe os dados do Anúncio da Meta (Meta Ads)
+  referral?: {
+    source_url?: string;
+    source_id?: string;
+    source_type?: string;
+    headline?: string;
+    body?: string;
+    media_image_url?: string;
+  };
 }
 
 export interface ParsedMessage {
@@ -21,4 +30,3 @@ export interface ParsedMessage {
   content: string;
   raw_payload: any;
 }
-
