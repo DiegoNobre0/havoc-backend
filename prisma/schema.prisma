@@ -151,7 +151,7 @@ model Kit {
   imageUrl      String?
   imageKey      String?
   discountType  String    @default("PERCENTAGE") // PERCENTAGE | FIXED
-  discountValue Decimal   @db.Decimal(10, 2)
+  discountValue Decimal   @default(0) @db.Decimal(10, 2)
   finalPrice    Decimal   @db.Decimal(10, 2)
   isActive      Boolean   @default(true)
   createdAt     DateTime  @default(now())

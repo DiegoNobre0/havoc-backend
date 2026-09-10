@@ -71,7 +71,7 @@ export const createKitSchema = z.object({
   slug: z.string(),
   description: z.string().optional(),
   discountType: z.enum(['PERCENTAGE', 'FIXED']),
-  discountValue: z.number().positive(),
+  discountValue: z.number().min(0).optional().default(0),
   productItems: z
     .array(
       z.object({

@@ -1,6 +1,5 @@
-import { prisma } from "../../../database/prisma.js";
-import { redis } from "../../../shared/redis/redis.js";
-
+import { prisma } from '../../../database/prisma.js';
+import { redis } from '../../../shared/redis/redis.js';
 
 interface KitCreateData {
   name: string;
@@ -45,29 +44,29 @@ export class KitService {
                   categories: {
                     select: {
                       id: true,
-                      name: true
-                    }
-                  }
-                }
-              }
-            }
-          }
+                      name: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
-        orderBy: { createdAt: 'desc' }
-      })
+        orderBy: { createdAt: 'desc' },
+      }),
     ]);
 
     return {
       data: kits,
-      meta: { total, page, limit, totalPages: Math.ceil(total / limit) }
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
 
   async createKit(data: KitCreateData) {
     // 1. Busca os preços originais dos produtos
-    const productIds = data.productItems.map(item => item.productId);
+    const productIds = data.productItems.map((item) => item.productId);
     const products = await prisma.product.findMany({
-      where: { id: { in: productIds }, deletedAt: null }
+      where: { id: { in: productIds }, deletedAt: null },
     });
 
     if (products.length !== productIds.length) {
@@ -76,7 +75,7 @@ export class KitService {
 
     // 2. Calcula o Subtotal base (Quantidade x Preço Unitário)
     let subtotal = 0;
-    data.productItems.forEach(item => {
+    data.productItems.forEach((item) => {
       const product = products.find((p: any) => p.id === item.productId);
       if (product) {
         subtotal += Number(product.price) * item.quantity;
@@ -86,7 +85,7 @@ export class KitService {
     // 3. Calcula o Preço Final aplicando o desconto
     let finalPrice = subtotal;
     if (data.discountType === 'PERCENTAGE') {
-      finalPrice = subtotal - (subtotal * (data.discountValue / 100));
+      finalPrice = subtotal - subtotal * (data.discountValue / 100);
     } else if (data.discountType === 'FIXED') {
       finalPrice = subtotal - data.discountValue;
     }
@@ -100,13 +99,13 @@ export class KitService {
         discountValue: data.discountValue,
         finalPrice: finalPrice,
         items: {
-          create: data.productItems.map(item => ({
+          create: data.productItems.map((item) => ({
             productId: item.productId,
-            quantity: item.quantity
-          }))
-        }
+            quantity: item.quantity,
+          })),
+        },
       },
-      include: { items: { include: { product: true } } }
+      include: { items: { include: { product: true } } },
     });
   }
 
@@ -114,26 +113,63 @@ export class KitService {
   async softDelete(id: string) {
     return prisma.kit.update({
       where: { id },
-      data: { deletedAt: new Date(), isActive: false }
+      data: { deletedAt: new Date(), isActive: false },
     });
   }
 
-
   async update(id: string, data: any) {
-    // Desestrutura productItems do restante dos dados do kit
-    const { productItems, ...kitData } = data;
+    const { productItems, discountType, discountValue, ...kitData } = data;
 
-    // Prepara o objeto de payload para o Prisma
-    const prismaUpdateData: any = {
-      ...kitData,
-    };
+    const prismaUpdateData: any = { ...kitData };
 
-    // Se productItems estiver presente na requisição, configura a atualização da relação
+    // Se veio produtos novos OU mudou o desconto, precisa recalcular o finalPrice
+    if (productItems || discountValue !== undefined || discountType !== undefined) {
+      // Pega os itens atuais do kit (caso productItems não tenha vindo na requisição)
+      const currentKit = await prisma.kit.findUniqueOrThrow({
+        where: { id },
+        include: { items: true },
+      });
+
+      const itemsToUse =
+        productItems ??
+        currentKit.items.map((i) => ({
+          productId: i.productId,
+          quantity: i.quantity,
+        }));
+
+      const productIds = itemsToUse.map((item: any) => item.productId);
+      const products = await prisma.product.findMany({
+        where: { id: { in: productIds }, deletedAt: null },
+      });
+
+      if (products.length !== productIds.length) {
+        throw new Error('Um ou mais produtos informados não existem ou foram removidos.');
+      }
+
+      let subtotal = 0;
+      itemsToUse.forEach((item: any) => {
+        const product = products.find((p: any) => p.id === item.productId);
+        if (product) subtotal += Number(product.price) * item.quantity;
+      });
+
+      const finalDiscountType = discountType ?? currentKit.discountType;
+      const finalDiscountValue = discountValue ?? Number(currentKit.discountValue);
+
+      let finalPrice = subtotal;
+      if (finalDiscountType === 'PERCENTAGE') {
+        finalPrice = subtotal - subtotal * (finalDiscountValue / 100);
+      } else if (finalDiscountType === 'FIXED') {
+        finalPrice = subtotal - finalDiscountValue;
+      }
+
+      prismaUpdateData.discountType = finalDiscountType;
+      prismaUpdateData.discountValue = finalDiscountValue;
+      prismaUpdateData.finalPrice = finalPrice > 0 ? finalPrice : 0;
+    }
+
     if (productItems) {
       prismaUpdateData.items = {
-        // Remove todos os itens anteriores vinculados a este kit
         deleteMany: {},
-        // Cria os novos itens com base no array recebido
         create: productItems.map((item: any) => ({
           productId: item.productId,
           quantity: item.quantity,
@@ -141,18 +177,16 @@ export class KitService {
       };
     }
 
-    // Executa a atualização no banco de dados
-    return prisma.kit.update({
-      where: { id },
-      data: prismaUpdateData,
-    });
+    const updated = await prisma.kit.update({ where: { id }, data: prismaUpdateData });
+    await this.clearCache(); // 👈 também notei que faltava aqui — createKit e toggleStatus limpam cache, update não
+    return updated;
   }
 
   async toggleStatus(id: string, isActive: boolean) {
     const kit = await prisma.kit.update({
       where: { id },
       data: { isActive },
-      select: { id: true, isActive: true } // Retorna só o essencial para economizar banda
+      select: { id: true, isActive: true }, // Retorna só o essencial para economizar banda
     });
     await this.clearCache(); // Se você estiver usando Redis para kits, lembre de limpar aqui!
     return kit;
