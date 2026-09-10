@@ -21,7 +21,7 @@ export const updateCategorySchema = createCategorySchema.partial();
 // ==========================================
 export const productQuerySchema = z.object({
   page: z.coerce.number().min(1).default(1),
-  limit: z.coerce.number().min(1).max(100).default(12),
+  limit: z.coerce.number().min(1).max(2000).default(2000),
   search: z.string().optional(),
   categoryId: z.string().uuid().optional(),
   isActive: z.enum(['true', 'false']).optional(),
@@ -84,7 +84,7 @@ export const createKitSchema = z.object({
 
 export const kitQuerySchema = z.object({
   page: z.coerce.number().min(1).default(1),
-  limit: z.coerce.number().min(1).max(100).default(12),
+  limit: z.coerce.number().min(1).max(2000).default(2000),
   search: z.string().optional(),
   categoryId: z.string().uuid().optional(),
 });
