@@ -16,17 +16,21 @@ export class ProductService {
   }
 
   async findMany(
-    page: number,
-    limit: number,
+    page: number = 1,
+    limit: number = 2000,
     search?: string,
     categoryId?: string,
     isActive?: boolean,
   ) {
-    const cacheKey = `${this.CACHE_PREFIX}page:${page}:limit:${limit}:search:${search || 'all'}:cat:${categoryId || 'all'}:active:${isActive || 'all'}`;
+    // Garante conversão numérica para evitar NaN no skip
+    const pageNum = Number(page) || 1;
+    const limitNum = Number(limit) || 2000;
+
+    const cacheKey = `${this.CACHE_PREFIX}page:${pageNum}:limit:${limitNum}:search:${search || 'all'}:cat:${categoryId || 'all'}:active:${isActive || 'all'}`;
     const cached = await redis.get(cacheKey);
     if (cached) return JSON.parse(cached);
 
-    const skip = (page - 1) * limit;
+    const skip = (pageNum - 1) * limitNum;
     const where: any = { deletedAt: null };
 
     if (search) where.name = { contains: search, mode: 'insensitive' };
@@ -42,7 +46,7 @@ export class ProductService {
       prisma.product.findMany({
         where,
         skip,
-        take: limit,
+        take: limitNum, // 👈 Usa o limite blindado
         include: { categories: { select: { id: true, name: true } } },
         orderBy: { createdAt: 'desc' },
       }),
@@ -50,7 +54,7 @@ export class ProductService {
 
     const result = {
       data: products,
-      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+      meta: { total, page: pageNum, limit: limitNum, totalPages: Math.ceil(total / limitNum) },
     };
 
     await redis.set(cacheKey, JSON.stringify(result), 'EX', 600);
