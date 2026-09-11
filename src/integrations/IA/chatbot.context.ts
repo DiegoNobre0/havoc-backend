@@ -408,11 +408,48 @@ export class ChatbotContext {
     }));
 
     // Busca no banco (Trazemos até 40 opções para a IA analisar)
-    const products = await prisma.product.findMany({
+    // Busca Estrita no banco
+    let products = await prisma.product.findMany({
       where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
-      orderBy: { name: 'asc' }, // 👉 Ajuda a IA a ler os itens já agrupados!
+      orderBy: { name: 'asc' },
       select: { name: true, price: true },
     });
+
+    // 🛡️ SALVA-VIDAS (Fuzzy Search): Se a busca estrita falhou, tenta aproximada
+    if (products.length === 0 && termos.length > 1) {
+      const condicoesOR = termos.map((termo) => ({
+        OR: [
+          { name: { contains: termo, mode: 'insensitive' as const } },
+          { categories: { some: { name: { contains: termo, mode: 'insensitive' as const } } } },
+        ],
+      }));
+
+      const produtosPossiveis = await prisma.product.findMany({
+        where: { isActive: true, stock: { gt: 0 }, OR: condicoesOR },
+        select: { name: true, price: true },
+      });
+
+      if (produtosPossiveis.length > 0) {
+        // Pontua e seleciona apenas os produtos que mais bateram com a pesquisa
+        produtosPossiveis.sort((a, b) => {
+          const nomeA = a.name.toLowerCase();
+          const nomeB = b.name.toLowerCase();
+          const scoreA = termos.filter((t) => nomeA.includes(t)).length;
+          const scoreB = termos.filter((t) => nomeB.includes(t)).length;
+          return scoreB - scoreA;
+        });
+
+        const melhorScore = termos.filter((t) =>
+          produtosPossiveis[0].name.toLowerCase().includes(t),
+        ).length;
+
+        products = produtosPossiveis
+          .filter(
+            (p) => termos.filter((t) => p.name.toLowerCase().includes(t)).length === melhorScore,
+          )
+          .sort((a, b) => a.name.localeCompare(b.name));
+      }
+    }
 
     if (products.length === 0) {
       return `Não encontrei produtos exatamente para "${termoBusca}".`;

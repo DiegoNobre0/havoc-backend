@@ -555,7 +555,7 @@ ETAPA 6 — CHECKOUT (A CATRACA DE VENDAS):
           description: `Busca produtos e categorias no banco de dados. 
 ⚠️ REGRA DE OURO (TRADUÇÃO E MAPEAMENTO DO CATÁLOGO):
 1. Adapte o pedido para a raiz da palavra. Ex: "Creatina" -> 'creatin'. "Termogênico" -> 'thermogenic'.
-2. SE O CLIENTE PEDIR UM TIPO ESPECÍFICO (ex: "Whey Isolado", "Proteína Isolada"), envie termo_busca: 'whey isolado'. NÃO envie apenas 'whey', senão você trará os concentrados misturados!
+2. SE O CLIENTE PEDIR UM TIPO ESPECÍFICO (ex: "Whey Isolado", "Proteína Isolada"), envie termo_busca: 'whey isolado'. NÃO envie a palavra 'proteina', pois isso atrapalha a busca no banco!
 3. Se o cliente pedir "Proteína da carne" -> envie termo_busca: 'beef' OU 'carnibol'.
 4. Se o cliente pedir "Albumina" ou "Proteína do ovo" -> envie termo_busca: 'albumina' OU 'uevo'.
 5. Se o cliente pedir "Pré-treino" ou "Energia" -> envie termo_busca: 'treino' OU 'booster' OU 'rush'.
@@ -687,9 +687,9 @@ ETAPA 6 — CHECKOUT (A CATRACA DE VENDAS):
     const msgLimpa = userMessage.toLowerCase().trim();
     // Verifica se o cliente mandou só o número (ex: "7", "quero o 7", "opcao 7")
     const isApenasNumero =
-      /^\d+$/.test(msgLimpa) ||
-      /^quero (o|a) \d+$/.test(msgLimpa) ||
-      /^op[cç][aã]o \d+$/.test(msgLimpa);
+      /^\d{1,3}$/.test(msgLimpa) ||
+      /^quero (o|a) \d{1,3}$/.test(msgLimpa) ||
+      /^op[cç][aã]o \d{1,3}$/.test(msgLimpa);
 
     if (userMessage.includes('[FORCAR_BUSCA]')) {
       forcedTool = { type: 'function', function: { name: 'listar_produtos' } };
@@ -716,7 +716,7 @@ ETAPA 6 — CHECKOUT (A CATRACA DE VENDAS):
       messages.push({
         role: 'system',
         content:
-          '⚠️ ALERTA DE SEGURANÇA MÁXIMA: O cliente enviou uma resposta curta. Se essa resposta for a ESCOLHA de um produto ou sabor da lista, VOCÊ É ESTRITAMENTE OBRIGADA a chamar a ferramenta "ver_detalhes_do_produto" enviando o nome completo do item. É TOTALMENTE PROIBIDO confirmar a escolha apenas conversando em texto.',
+          '⚠️ ALERTA DE SEGURANÇA: O cliente enviou uma resposta curta. 1) Se for um agradecimento, despedida ou concordância genérica (ex: "obrigada", "obrigado", "ta certo", "ok", "valeu"), APENAS converse normalmente e seja educada. NÃO chame nenhuma ferramenta. 2) MAS SE a resposta for a ESCOLHA de um sabor ou produto da lista (ex: "baunilha", "chocolate"), VOCÊ É ESTRITAMENTE OBRIGADA a chamar a ferramenta "ver_detalhes_do_produto" enviando o nome completo do item. NUNCA confirme a escolha apenas com texto.',
       });
     }
 
