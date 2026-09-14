@@ -452,7 +452,7 @@ export class ChatbotContext {
     }
 
     if (products.length === 0) {
-      return `Não encontrei produtos exatamente para "${termoBusca}".`;
+      return `⚠️ ALERTA DO BANCO DE DADOS: O termo "${termoBusca}" retornou ZERO produtos no estoque.\n\n🛑 REGRA DE SEGURANÇA E ANTI-ALUCINAÇÃO: É ESTRITAMENTE PROIBIDO inventar produtos da sua cabeça. NUNCA crie nomes genéricos (como "Termogênico A", "Termogênico B") e NUNCA adicione "Sem Cafeína" a um produto que o banco não confirmou. Apenas peça desculpas, diga que não encontrou produtos para essa finalidade no momento e pergunte se ele quer ver outra categoria.`;
     }
 
     // 2. Entrega a lista crua e deixa a IA agrupar e embelezar!

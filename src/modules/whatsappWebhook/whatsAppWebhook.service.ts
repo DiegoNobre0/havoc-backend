@@ -109,6 +109,13 @@ export class WhatsAppWebhookService {
     switch (msg.type) {
       case 'text':
         content = msg.text?.body || '';
+
+        // 🛡️ FILTRO ANTI-LIXO DA META API
+        // Se o conteúdo for puramente um número gigante (mais de 6 dígitos), é a Meta mandando ID de evento. Ignorar.
+        if (/^\d{6,}$/.test(content.trim())) {
+          console.log(`[Webhook] 🗑️ Lixo da Meta ignorado: ${content}`);
+          content = ''; // Limpa para a IA não receber
+        }
         break;
       case 'audio':
         content = msg.audio?.id || '';
