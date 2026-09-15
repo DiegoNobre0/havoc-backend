@@ -565,7 +565,10 @@ ETAPA 6 — CHECKOUT (A CATRACA DE VENDAS):
    - "Imunidade / Ficar doente / Resfriado" -> envie: 'nac' OU 'glutamina' OU 'vitamina c'
    - "Dor na junta / Articulação" -> envie: 'colageno' OU 'joint'
    - "Libido / Desejo sexual" -> envie: 'afrodite' OU 'maca' OU 'tribulus'
-8. Se o cliente pedir uma marca junto com o produto, envie a marca e a raiz (ex: 'creatin dux' ou 'whey max').`,
+8. Se o cliente pedir uma marca junto com o produto, envie a marca e a raiz (ex: 'creatin dux' ou 'whey max').
+9. 🏋️‍♂️ PROTOCOLO DE ACESSÓRIOS E INGLES: Se o cliente pedir "Munhequeira", "Strap", "Faixa de pulso" ou "Fita para treino" -> envie termo_busca: 'strap'. Se pedir "Coqueteleira" ou "Garrafa" -> envie: 'coqueteleira' OU 'galao'.
+`,
+
           parameters: {
             type: 'object',
             properties: { termo_busca: { type: 'string' } },

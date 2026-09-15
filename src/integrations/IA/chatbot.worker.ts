@@ -175,6 +175,43 @@ Visão identificou: "${descricao}".
       const inputLimpo = textoFinal?.trim() || '';
       const textoMinusculo = textoFinal?.toLowerCase() || '';
 
+      // 🛡️ O INTERCEPTADOR SILENCIOSO (Filtro Anti-Chato)
+      // Se o cliente encerrou a conversa e o carrinho está vazio, morre aqui.
+      const encerramentos = [
+        'certo',
+        'ok',
+        'obrigado',
+        'obrigada',
+        'valeu',
+        'ta bom',
+        'beleza',
+        'tá ótimo',
+        'ta certo',
+        'obg',
+        'obgda',
+        'blz',
+      ];
+
+      if (
+        encerramentos.includes(textoMinusculo) &&
+        (!session.carrinho || session.carrinho.length === 0)
+      ) {
+        console.log(
+          `[Worker] 🤫 Cliente mandou "${textoMinusculo}" sem carrinho. Encerrando chat silenciosamente.`,
+        );
+
+        await prisma.chatSession.update({
+          where: { sessionKey: sKey },
+          data: { status: 'FINALIZADO', isActive: false },
+        });
+
+        // Limpa a memória pra garantir
+        await (redis as any).del(sessionKey(sKey));
+        await (redis as any).del(historyKey(sKey));
+
+        return; // 👈 O GRANDE SEGREDO: O return para o código aqui! A IA não é chamada e não responde nada.
+      }
+
       // ── Interceptadores de Botões de Ação ────────────────────
 
       // 1. Confirmação do Produto ("Sim, é esse!")
@@ -472,3 +509,43 @@ Carrinho atual: ${carrinhoTexto}.
 chatbotWorker.on('failed', (job, err) => console.error(`🚨 [Worker] Job ${job?.id} falhou:`, err));
 
 chatbotWorker.on('completed', (job) => console.log(`✅ [Worker] Job ${job.id} concluído.`));
+
+// ─── CRON JOB DE FAXINA (RODA A CADA 1 HORA) ──────────────────────
+setInterval(
+  async () => {
+    try {
+      // Define o tempo limite: Considera inativo quem não manda mensagem há 2 horas
+      const duasHorasAtras = new Date(Date.now() - 2 * 60 * 60 * 1000);
+
+      // Busca clientes que abandonaram o carrinho ou a conversa no meio
+      const sessoesInativas = await prisma.chatSession.findMany({
+        where: {
+          isActive: true,
+          updatedAt: { lt: duasHorasAtras },
+          status: { notIn: ['FINALIZADO', 'CANCELADO'] },
+        },
+      });
+
+      for (const session of sessoesInativas) {
+        // 1. Encerra no banco de dados
+        await prisma.chatSession.update({
+          where: { id: session.id },
+          data: { status: 'FINALIZADO', isActive: false },
+        });
+
+        // 2. Limpa o Redis para o cliente não voltar com lixo do passado no dia seguinte
+        await (redis as any).del(`chat:session:${session.sessionKey}`);
+        await (redis as any).del(`chat:history:${session.sessionKey}`);
+      }
+
+      if (sessoesInativas.length > 0) {
+        console.log(
+          `🧹 [Cron Job] ${sessoesInativas.length} sessões abandonadas há mais de 2h foram encerradas.`,
+        );
+      }
+    } catch (error) {
+      console.error('❌ [Cron Error]:', error);
+    }
+  },
+  60 * 60 * 1000,
+);
