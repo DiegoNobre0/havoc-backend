@@ -464,22 +464,20 @@ export class ChatbotContext {
     text += `\n⚠️ INSTRUÇÃO DE SEGURANÇA MÁXIMA PARA A IA (LEI DE SOBREVIVÊNCIA): 
 🚨 OVERRIDE DE SISTEMA: IGNORE A REGRA DE MENSAGENS CURTAS. É OBRIGATÓRIO GERAR UMA LISTA LONGA E COMPLETA.
 1. 🎯 OBRIGAÇÃO DE AGRUPAMENTO: Você DEVE unir produtos da mesma Marca, Linha e Gramatura em um ÚNICO número, extraindo os sabores para a linha debaixo.
-   - ❌ ERRADO: 1. Whey Dux Morango | 2. Whey Dux Chocolate
-   - ✅ CERTO: 1. Whey Concentrado Dux 900g | 🎨 Sabores: Morango, Chocolate
 2. 🚫 FILTRE E OCULTE produtos como "Sachês", "Amostras" ou de 34g/30g, a menos que o cliente os tenha pedido.
-3. Extraia TODOS os sabores. É ESTRITAMENTE PROIBIDO omitir qualquer sabor retornado pelo banco na linha "🎨 Sabores". 
-4. ⚠️ REGRA ANTI-PREGUIÇA (CRÍTICA): Você sofre de "Lazy Generation" e corta listas no meio para economizar texto. Você está TERMINANTEMENTE PROIBIDA de fazer isso! Agrupar sabores NÃO é resumir! Exiba absolutamente TODAS as marcas, linhas e gramaturas diferentes que sobraram após o filtro. Se o banco retornou 20, 30 ou mais produtos diferentes, VOCÊ É OBRIGADA A IMPRIMIR TODOS ELES. Não pare de gerar a lista e não encerre a mensagem até que 100% dos produtos do banco tenham sido exibidos na tela.
-5. Formate a lista ESTRITAMENTE neste padrão visual (use os exatos emojis):
+3. Extraia TODOS os sabores. É ESTRITAMENTE PROIBIDO omitir qualquer sabor. ⚠️ REGRA DE SABOR: Se o produto não tiver variação de sabor, REMOVA COMPLETAMENTE a linha "🎨 Sabores". É terminantemente proibido escrever "N/A", "Nenhum" ou "Sem sabor".
+4. ⚠️ REGRA ANTI-PREGUIÇA (CRÍTICA): Agrupar sabores NÃO é resumir! Exiba absolutamente TODAS as marcas, linhas e gramaturas diferentes. Se o banco retornou 30 produtos, IMPRIMA TODOS ELES. Não encerre a mensagem até exibir 100%.
+5. 🚫 PROIBIÇÃO DE FOTOS E LINKS (MUITO IMPORTANTE): É ESTRITAMENTE PROIBIDO inventar links de imagens, usar código markdown para fotos (ex: ![imagem](url)) ou tentar exibir fotos nesta lista. A listagem deve ser APENAS TEXTO. As fotos reais serão mostradas na próxima etapa, apenas quando o cliente escolher o produto e você chamar a ferramenta de detalhes!
+6. Formate a lista ESTRITAMENTE neste padrão visual (use os exatos emojis):
 
 *1. [Nome da Marca, Linha e Peso (ex: B.O.P.E 300g Black Skull)]*
-🎨 Sabores: [Sabor 1], [Sabor 2], [Sabor 3]
+🎨 Sabores: [Sabor 1], [Sabor 2]
 💰 R$ [Preço]
 
 *2. [Próxima Marca, Linha e Peso]*
 💰 R$ [Preço]
 
-(Obs: Se houver apenas 1 opção sem variação de sabor, não coloque a linha "🎨 Sabores").
-6. No final da lista, pergunte: "Qual desses te interessou? Me fala o nome do produto ou o número! 😊"`;
+7. No final da lista, pergunte: "Qual desses te interessou? Me fala o nome do produto ou o número! 😊"`;
 
     return text;
   }
