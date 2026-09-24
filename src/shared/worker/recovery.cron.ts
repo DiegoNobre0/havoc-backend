@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import dayjs from 'dayjs';
 import { prisma } from '../../database/prisma.js';
 import { WhatsAppIntegrationService } from '../../integrations/whatsapp/whatsappIntegration.service.js';
+import { redis } from '../redis/redis.js';
 
 const whatsapp = new WhatsAppIntegrationService();
 
@@ -134,18 +135,23 @@ cron.schedule('*/15 * * * *', async () => {
     );
 
     for (const sessao of sessoesEsquecidas) {
-      // 3. Devolve o controle para a IA e desvincula o usuário humano
+      // 3. Devolve o controle para a IA, desvincula o humano e FINALIZA a sessão
       await prisma.chatSession.update({
         where: { id: sessao.id },
         data: {
-          isActive: true,
-          status: 'NOVO_ATENDIMENTO', // Volta para a tela inicial do seu Dashboard
-          userId: null, // Tira o chat da caixa de entrada do funcionário
-          recoveryAttempts: 0, // Zera para permitir nova recuperação futura se necessário
+          isActive: false, // Mantém false pra não disparar gatilhos futuros atoa
+          status: 'FINALIZADO', // Fim do loop do cron!
+          userId: null, // Tira da caixa de entrada do funcionário
+          recoveryAttempts: 0,
+          updatedAt: new Date(),
         },
       });
 
-      // 🔥 4. OPCIONAL (MAS RECOMENDADO): Avisa o cliente que a IA voltou
+      // 👉 COLOQUE AQUI! Limpa a memória do Redis logo após atualizar o banco de dados
+      await (redis as any).del(`chat:session:${sessao.sessionKey}`);
+      await (redis as any).del(`chat:history:${sessao.sessionKey}`);
+
+      // 🔥 4. Avisa o cliente que o atendimento foi encerrado
       const primeiroNome = sessao.customerName ? sessao.customerName.split(' ')[0] : '';
       const saudacao = primeiroNome ? `Oi, ${primeiroNome}!` : `Oii!`;
 
