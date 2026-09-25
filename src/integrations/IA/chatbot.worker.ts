@@ -1,10 +1,11 @@
-import { Worker, Queue } from 'bullmq';
+import { DelayedError, Worker, Queue } from 'bullmq';
 import { IAService } from './IA.service.js';
 import { prisma } from '../../database/prisma.js';
 import { redis } from '../../shared/redis/redis.js';
 import { WhatsAppIntegrationService } from '../whatsapp/whatsappIntegration.service.js';
 import { ChatbotContext } from './chatbot.context.js';
 import { io } from '../../shared/socket/socket.js';
+import { randomUUID } from 'node:crypto';
 
 const iaService = new IAService();
 const whatsapp = new WhatsAppIntegrationService();
@@ -48,22 +49,35 @@ console.log('🤖 [Worker] Inicializando Chatbot Worker...');
 
 export const chatbotWorker = new Worker(
   'whatsapp-queue',
-  async (job) => {
+  async (job, token) => {
     const { sessionKey: sKey, customerName, message } = job.data;
 
     // ── Lock — garante ordem por cliente ─────────────────────
     const lKey = `lock:${sKey}`;
-    const lock = await (redis as any).set(lKey, '1', 'EX', 120, 'NX');
-
-    const lockRenewer = setInterval(async () => {
-      await (redis as any).expire(lKey, 120);
-      console.log(`[Worker] 🔄 Lock renovado para ${sKey}`);
-    }, 30_000);
+    const lockToken = randomUUID();
+    const lock = await (redis as any).set(lKey, lockToken, 'EX', 120, 'NX');
 
     if (!lock) {
-      await job.moveToDelayed(Date.now() + 2000);
-      return;
+      await job.moveToDelayed(Date.now() + 2000, token);
+      throw new DelayedError();
     }
+
+    const lockRenewer = setInterval(async () => {
+      try {
+        await (redis as any).eval(
+          `if redis.call('get', KEYS[1]) == ARGV[1] then
+             return redis.call('expire', KEYS[1], ARGV[2])
+           end
+           return 0`,
+          1,
+          lKey,
+          lockToken,
+          120,
+        );
+      } catch (error) {
+        console.error(`[Worker] Falha ao renovar lock de ${sKey}:`, error);
+      }
+    }, 30_000);
 
     try {
       // ── Comando especial /excluir ────────────────────────────
@@ -108,16 +122,6 @@ Visão identificou: "${descricao}".
       }
 
       // ── Sessão ───────────────────────────────────────────────
-      let session = await getSession(sKey);
-
-      if (session) {
-        session.customerName = customerName || session.customerName;
-      } else {
-        session = { sessionKey: sKey, customerName, isActive: true, id: sKey, carrinho: [] };
-      }
-
-      await saveSession(sKey, session);
-
       let dbSession = await prisma.chatSession.upsert({
         where: { sessionKey: sKey },
         create: { sessionKey: sKey, customerName, isActive: true, status: 'NOVO_ATENDIMENTO' },
@@ -135,10 +139,23 @@ Visão identificou: "${descricao}".
             recoveryAttempts: 0,
           },
         });
-
-        session.isActive = true;
-        await saveSession(sKey, session);
       }
+
+      let session = await getSession(sKey);
+      if (session) {
+        session.customerName = customerName || session.customerName;
+        session.isActive = dbSession.isActive;
+      } else {
+        session = {
+          sessionKey: sKey,
+          customerName,
+          isActive: dbSession.isActive,
+          id: dbSession.id,
+          carrinho: [],
+        };
+      }
+
+      await saveSession(sKey, session);
 
       if (!session.isActive) {
         console.log(`[Worker] 👨‍💻 Sessão com Humano. Salvando mensagem sem chamar a IA.`);
@@ -150,12 +167,19 @@ Visão identificou: "${descricao}".
             sessionKey: sKey,
             lastMessage: textoFinal,
             role: 'USER',
+            status: dbSession.status,
+            isActive: dbSession.isActive,
           });
         }
         await prisma.chatSession
           .upsert({
             where: { sessionKey: sKey },
-            create: { sessionKey: sKey, customerName, isActive: false },
+            create: {
+              sessionKey: sKey,
+              customerName,
+              isActive: false,
+              status: 'ATENDIMENTO_HUMANO',
+            },
             update: { customerName },
           })
           .then((dbSession) =>
@@ -202,7 +226,11 @@ Visão identificou: "${descricao}".
 
         await prisma.chatSession.update({
           where: { sessionKey: sKey },
-          data: { status: 'FINALIZADO', isActive: false },
+          data: {
+            status: 'FINALIZADO',
+            isActive: true,
+            handoffRequestedAt: null,
+          },
         });
 
         // Limpa a memória pra garantir
@@ -340,6 +368,8 @@ Carrinho atual: ${carrinhoTexto}.
           sessionKey: sKey,
           lastMessage: textoParaHistorico,
           role: 'USER',
+          status: dbSession.status,
+          isActive: dbSession.isActive,
         });
       }
 
@@ -352,7 +382,31 @@ Carrinho atual: ${carrinhoTexto}.
       });
 
       const aiResponse = await iaService.generateResponse(session, textoFinal, history);
-      await saveSession(sKey, session);
+      const persistedControl = await prisma.chatSession.findUnique({
+        where: { sessionKey: sKey },
+        select: { status: true, isActive: true },
+      });
+
+      if (persistedControl) {
+        dbSession.status = persistedControl.status;
+        dbSession.isActive = persistedControl.isActive;
+      }
+
+      if (!dbSession.isActive && !aiResponse.handoff) {
+        console.log(
+          `[Worker] Atendimento assumido por humano durante a geração. Resposta da IA descartada.`,
+        );
+        return;
+      }
+
+      const shouldResetSession =
+        dbSession.status === 'FINALIZADO' || dbSession.status === 'CANCELADO';
+
+      if (shouldResetSession) {
+        session.carrinho = [];
+      } else {
+        await saveSession(sKey, session);
+      }
 
       // ── Handoff ──────────────────────────────────────────────
       if (aiResponse.handoff) {
@@ -361,15 +415,21 @@ Carrinho atual: ${carrinhoTexto}.
         session.handoffRequestedAt = new Date().toISOString();
         await saveSession(sKey, session);
 
-        await prisma.chatSession.upsert({
+        dbSession = await prisma.chatSession.upsert({
           where: { sessionKey: sKey },
           create: {
             sessionKey: sKey,
             customerName,
             isActive: false,
+            status: 'ATENDIMENTO_HUMANO',
             handoffRequestedAt: new Date(),
           },
-          update: { isActive: false, customerName, handoffRequestedAt: new Date() },
+          update: {
+            isActive: false,
+            status: 'ATENDIMENTO_HUMANO',
+            customerName,
+            handoffRequestedAt: new Date(),
+          },
         });
 
         await adminNotificationQueue.add('handoff-request', {
@@ -419,7 +479,9 @@ Carrinho atual: ${carrinhoTexto}.
         finalContent = finalContent.replace(/\[BOTOES_UPSELL\]/g, '').trim();
 
         if (finalContent) {
-          await pushHistory(sKey, 'ASSISTANT', finalContent);
+          if (!shouldResetSession) {
+            await pushHistory(sKey, 'ASSISTANT', finalContent);
+          }
           if (io) {
             io.to(`chat_${sKey}`).emit('new_message', { role: 'ASSISTANT', content: finalContent });
             io.to('all_chats').emit('chat_updated', {
@@ -427,11 +489,13 @@ Carrinho atual: ${carrinhoTexto}.
               sessionKey: sKey,
               lastMessage: finalContent,
               role: 'ASSISTANT',
+              status: dbSession.status,
+              isActive: dbSession.isActive,
             });
           }
         }
 
-        prisma.chatSession
+        await prisma.chatSession
           .upsert({
             where: { sessionKey: sKey },
             create: { sessionKey: sKey, customerName, isActive: true },
@@ -490,13 +554,26 @@ Carrinho atual: ${carrinhoTexto}.
         console.log(`[WhatsApp] ✅ Resposta enviada para ${sKey}`);
       }
 
+      if (shouldResetSession) {
+        await (redis as any).del(sessionKey(sKey));
+        await (redis as any).del(historyKey(sKey));
+      }
+
       console.log(`🏁 [Worker] Job ${job.id} finalizado.`);
     } catch (error) {
       console.error(`❌ [Worker] Falha no Job ${job.id}:`, error);
       throw error;
     } finally {
       clearInterval(lockRenewer);
-      await (redis as any).del(lKey);
+      await (redis as any).eval(
+        `if redis.call('get', KEYS[1]) == ARGV[1] then
+           return redis.call('del', KEYS[1])
+         end
+         return 0`,
+        1,
+        lKey,
+        lockToken,
+      );
     }
   },
   {
@@ -522,16 +599,22 @@ setInterval(
         where: {
           isActive: true,
           updatedAt: { lt: duasHorasAtras },
-          status: { notIn: ['FINALIZADO', 'CANCELADO'] },
+          status: 'NOVO_ATENDIMENTO',
         },
       });
 
       for (const session of sessoesInativas) {
-        // 1. Encerra no banco de dados
-        await prisma.chatSession.update({
-          where: { id: session.id },
-          data: { status: 'FINALIZADO', isActive: false },
+        const claimed = await prisma.chatSession.updateMany({
+          where: {
+            id: session.id,
+            isActive: true,
+            status: 'NOVO_ATENDIMENTO',
+            updatedAt: { lt: duasHorasAtras },
+          },
+          data: { status: 'FINALIZADO', isActive: true, handoffRequestedAt: null },
         });
+
+        if (claimed.count === 0) continue;
 
         // 2. Limpa o Redis para o cliente não voltar com lixo do passado no dia seguinte
         await (redis as any).del(`chat:session:${session.sessionKey}`);

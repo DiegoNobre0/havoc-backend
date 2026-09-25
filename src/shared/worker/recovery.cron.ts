@@ -48,9 +48,14 @@ cron.schedule('0 * * * *', async () => {
 
       // Se o cliente já comprou de forma avulsa, marca a sessão como FINALIZADA e pula
       if (pedidoExistente) {
-        await prisma.chatSession.update({
-          where: { id: sessao.id },
-          data: { status: 'FINALIZADO' },
+        await prisma.chatSession.updateMany({
+          where: {
+            id: sessao.id,
+            isActive: true,
+            status: { in: ['EM_ANDAMENTO', 'AGUARDANDO_PAGAMENTO'] },
+            updatedAt: { lte: limiteSuperior },
+          },
+          data: { status: 'FINALIZADO', isActive: true },
         });
         continue;
       }
@@ -61,6 +66,19 @@ cron.schedule('0 * * * *', async () => {
       try {
         // ── TENTATIVA 1: O Primeiro Lembrete (Após 4 horas de vácuo) ──
         if (sessao.recoveryAttempts === 0) {
+          const claimed = await prisma.chatSession.updateMany({
+            where: {
+              id: sessao.id,
+              isActive: true,
+              status: { in: ['EM_ANDAMENTO', 'AGUARDANDO_PAGAMENTO'] },
+              recoveryAttempts: 0,
+              updatedAt: { lte: limiteSuperior },
+            },
+            data: { recoveryAttempts: 1, updatedAt: new Date() },
+          });
+
+          if (claimed.count === 0) continue;
+
           const msg1 = `${saudacao} Aqui é a Carol da Havoc de novo 🙋‍♀️\n\nVi que a gente conversou mais cedo e seu carrinho ficou aberto. Ficou alguma dúvida sobre os suplementos ou quer ajuda para fechar?`;
 
           await whatsapp.sendTextMessage(sessao.sessionKey, msg1);
@@ -68,31 +86,34 @@ cron.schedule('0 * * * *', async () => {
             data: { sessionId: sessao.id, role: 'ASSISTANT', content: msg1 },
           });
 
-          // Atualiza para 1 tentativa. O updatedAt vira "agora", dando +4h de respiro pro cliente.
-          await prisma.chatSession.update({
-            where: { id: sessao.id },
-            data: { recoveryAttempts: 1 },
-          });
-
           console.log(`📩 [Resgate 1] Enviado para ${sessao.customerName || sessao.sessionKey}`);
         }
 
         // ── TENTATIVA 2: A Última Chamada (Mais 4 horas se passaram desde o lembrete 1) ──
         else if (sessao.recoveryAttempts === 1) {
+          const claimed = await prisma.chatSession.updateMany({
+            where: {
+              id: sessao.id,
+              isActive: true,
+              status: { in: ['EM_ANDAMENTO', 'AGUARDANDO_PAGAMENTO'] },
+              recoveryAttempts: 1,
+              updatedAt: { lte: limiteSuperior },
+            },
+            data: {
+              recoveryAttempts: 2,
+              status: 'FINALIZADO',
+              isActive: true,
+              updatedAt: new Date(),
+            },
+          });
+
+          if (claimed.count === 0) continue;
+
           const msg2 = `${saudacao} Carol aqui! Passando rápido só para avisar que o estoque de alguns itens que você olhou está baixando rápido hoje. 😱\n\nSe quiser garantir seus suplementos com o frete fixo de entrega, me avisa aqui para eu gerar seu Pix de checkout!`;
 
           await whatsapp.sendTextMessage(sessao.sessionKey, msg2);
           await prisma.chatMessage.create({
             data: { sessionId: sessao.id, role: 'ASSISTANT', content: msg2 },
-          });
-
-          // Como é a segunda e última tentativa, finaliza o atendimento definitivamente
-          await prisma.chatSession.update({
-            where: { id: sessao.id },
-            data: {
-              recoveryAttempts: 2,
-              status: 'FINALIZADO', // Sai do funil ativo e vai para o arquivo
-            },
           });
 
           console.log(
@@ -122,6 +143,7 @@ cron.schedule('*/15 * * * *', async () => {
     const sessoesEsquecidas = await prisma.chatSession.findMany({
       where: {
         isActive: false,
+        status: 'ATENDIMENTO_HUMANO',
         updatedAt: {
           lte: limiteInatividade,
         },
@@ -135,17 +157,25 @@ cron.schedule('*/15 * * * *', async () => {
     );
 
     for (const sessao of sessoesEsquecidas) {
-      // 3. Devolve o controle para a IA, desvincula o humano e FINALIZA a sessão
-      await prisma.chatSession.update({
-        where: { id: sessao.id },
+      // Apenas uma instância pode concluir a transição e enviar o aviso.
+      const claimed = await prisma.chatSession.updateMany({
+        where: {
+          id: sessao.id,
+          isActive: false,
+          status: 'ATENDIMENTO_HUMANO',
+          updatedAt: { lte: limiteInatividade },
+        },
         data: {
-          isActive: false, // Mantém false pra não disparar gatilhos futuros atoa
-          status: 'FINALIZADO', // Fim do loop do cron!
+          isActive: true,
+          status: 'FINALIZADO',
           userId: null, // Tira da caixa de entrada do funcionário
+          handoffRequestedAt: null,
           recoveryAttempts: 0,
           updatedAt: new Date(),
         },
       });
+
+      if (claimed.count === 0) continue;
 
       // 👉 COLOQUE AQUI! Limpa a memória do Redis logo após atualizar o banco de dados
       await (redis as any).del(`chat:session:${sessao.sessionKey}`);

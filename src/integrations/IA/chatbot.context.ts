@@ -735,7 +735,7 @@ export class ChatbotContext {
       // 1. Procura se existe um pedido PENDENTE no banco para esse cliente
       const order = await prisma.order.findFirst({
         where: {
-          user: { chatSessions: { some: { sessionKey } } },
+          customerPhone: sessionKey,
           status: 'PENDING',
         },
         orderBy: { createdAt: 'desc' },
@@ -747,6 +747,18 @@ export class ChatbotContext {
           data: { status: 'CANCELLED' },
         });
       }
+
+      await prisma.chatSession.updateMany({
+        where: { sessionKey },
+        data: {
+          status: 'CANCELADO',
+          isActive: true,
+          handoffRequestedAt: null,
+        },
+      });
+
+      await (redis as any).del(`chat:session:${sessionKey}`);
+      await (redis as any).del(`chat:history:${sessionKey}`);
 
       return 'Pedido e atendimento cancelados com sucesso. Se precisar de algo, é só chamar!';
     } catch (error) {

@@ -169,6 +169,7 @@ export class IAService {
         });
 
         // 4. Limpa a memória RAM/Redis do Chatbot (Garante o reset completo do carrinho)
+        session.carrinho = [];
         const workerSessionKey = `chat:session:${sessionKey}`;
         const workerHistoryKey = `chat:history:${sessionKey}`;
         await redis.del(workerSessionKey);

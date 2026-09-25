@@ -292,7 +292,7 @@ model ChatSession {
   id                 String    @id @default(uuid())
   sessionKey         String    @unique @default(uuid())
   customerName       String?
-  isActive           Boolean   @default(false)
+  isActive           Boolean   @default(true)
   recoveryAttempts   Int               @default(0)
   status             ChatSessionStatus @default(NOVO_ATENDIMENTO)
   createdAt          DateTime  @default(now())

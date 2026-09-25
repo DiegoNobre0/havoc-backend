@@ -1,8 +1,6 @@
-
 import { prisma } from '../../database/prisma.js';
 import { WhatsAppIntegrationService } from '../../integrations/whatsapp/whatsappIntegration.service.js';
 import { redis } from '../../shared/redis/redis.js';
-
 
 export class ChatbotService {
   private CACHE_PREFIX = 'chatbot:sessions:';
@@ -14,22 +12,20 @@ export class ChatbotService {
     if (keys.length > 0) await redis.del(keys);
   }
 
-
   // 1. Busca todas as sessões (em TEMPO REAL, sem cache para evitar fantasmas no F5)
   async findSessions(page: number, limit: number, search?: string, status?: string) {
     const skip = (page - 1) * limit;
     const where: any = {};
 
-   
     if (search) {
       where.OR = [
         { sessionKey: { contains: search } },
-        { customerName: { contains: search, mode: 'insensitive' } } // mode insensitive ignora maiúsculas/minúsculas
+        { customerName: { contains: search, mode: 'insensitive' } }, // mode insensitive ignora maiúsculas/minúsculas
       ];
     }
 
     if (status) {
-      where.status = status; 
+      where.status = status;
     }
 
     const [total, sessions] = await Promise.all([
@@ -42,15 +38,15 @@ export class ChatbotService {
         include: {
           messages: {
             orderBy: { createdAt: 'desc' },
-            take: 1 // Traz só a última mensagem para o preview
-          }
-        }
-      })
+            take: 1, // Traz só a última mensagem para o preview
+          },
+        },
+      }),
     ]);
 
     return {
       data: sessions,
-      meta: { total, page, limit, totalPages: Math.ceil(total / limit) }
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
   // 2. Detalhes de uma sessão específica
@@ -62,7 +58,7 @@ export class ChatbotService {
   async findMessages(sessionId: string) {
     return prisma.chatMessage.findMany({
       where: { sessionId },
-      orderBy: { createdAt: 'asc' }
+      orderBy: { createdAt: 'asc' },
     });
   }
 
@@ -75,25 +71,48 @@ export class ChatbotService {
     await this.whatsapp.sendTextMessage(session.sessionKey, content);
 
     // Salva no banco como atendente (ASSISTANT)
-    const newMessage = await prisma.chatMessage.create({
-      data: {
-        sessionId,
-        role: 'ASSISTANT',
-        content
-      }
-    });
+    const [, newMessage] = await prisma.$transaction([
+      prisma.chatSession.update({
+        where: { id: sessionId },
+        data: {
+          isActive: false,
+          status: 'ATENDIMENTO_HUMANO',
+          handoffRequestedAt: session.handoffRequestedAt ?? new Date(),
+          updatedAt: new Date(),
+        },
+      }),
+      prisma.chatMessage.create({
+        data: {
+          sessionId,
+          role: 'ASSISTANT',
+          content,
+        },
+      }),
+    ]);
+
+    const workerRedisKey = `chat:session:${session.sessionKey}`;
+    const sessionCache = await (redis as any).get(workerRedisKey);
+    if (sessionCache) {
+      const parsedSession = JSON.parse(sessionCache);
+      parsedSession.isActive = false;
+      await (redis as any).set(workerRedisKey, JSON.stringify(parsedSession), 'EX', 86400);
+    }
 
     await this.clearCache();
     return newMessage;
   }
 
   // 5. Liga/Desliga a IA (Handoff)
-async toggleStatus(id: string, isActive: boolean) {
+  async toggleStatus(id: string, isActive: boolean) {
     // 1. Atualiza no PostgreSQL
     const session = await prisma.chatSession.update({
       where: { id },
-      data: { isActive },
-      select: { id: true, isActive: true, sessionKey: true }
+      data: {
+        isActive,
+        status: isActive ? 'EM_ANDAMENTO' : 'ATENDIMENTO_HUMANO',
+        handoffRequestedAt: isActive ? null : new Date(),
+      },
+      select: { id: true, isActive: true, status: true, sessionKey: true },
     });
 
     // 2. 👉 A MÁGICA DO WORKER: Atualiza a sessão específica no Redis mantendo o carrinho!
@@ -103,7 +122,7 @@ async toggleStatus(id: string, isActive: boolean) {
     if (sessionCache) {
       const parsedSession = JSON.parse(sessionCache);
       parsedSession.isActive = isActive; // Atualiza só o status
-      
+
       // Salva de volta (usando o TTL de 24h igual no Worker)
       await (redis as any).set(workerRedisKey, JSON.stringify(parsedSession), 'EX', 86400);
     }
@@ -126,14 +145,16 @@ async toggleStatus(id: string, isActive: boolean) {
           systemPrompt: 'Você é a Carol, consultora de vendas da Havoc Suplementos...',
           temperature: 0.7,
           maxTokens: 500,
-          fallbackMessage: 'No momento estou processando muitas mensagens. Um humano já vai te atender!',
-        }
+          fallbackMessage:
+            'No momento estou processando muitas mensagens. Um humano já vai te atender!',
+        },
       });
     }
     return config;
   }
 
-  async updateConfig(data: any) { // Importe o UpdateConfigBody se quiser tipar
+  async updateConfig(data: any) {
+    // Importe o UpdateConfigBody se quiser tipar
     const config = await this.getConfig(); // Garante que existe
 
     return prisma.chatbotConfig.update({
@@ -144,25 +165,58 @@ async toggleStatus(id: string, isActive: boolean) {
   async updateSessionStatusById(id: string, status: any) {
     const session = await prisma.chatSession.update({
       where: { id },
-      data: { status }
+      data: {
+        status,
+        isActive: status !== 'ATENDIMENTO_HUMANO',
+        handoffRequestedAt: status === 'ATENDIMENTO_HUMANO' ? new Date() : null,
+      },
     });
+
+    const workerRedisKey = `chat:session:${session.sessionKey}`;
+    const sessionCache = await (redis as any).get(workerRedisKey);
+    if (sessionCache) {
+      const parsedSession = JSON.parse(sessionCache);
+      parsedSession.isActive = session.isActive;
+      await (redis as any).set(workerRedisKey, JSON.stringify(parsedSession), 'EX', 86400);
+    }
+
+    if (status === 'FINALIZADO' || status === 'CANCELADO') {
+      await (redis as any).del(workerRedisKey);
+      await (redis as any).del(`chat:history:${session.sessionKey}`);
+    }
 
     await this.clearCache();
     return session;
   }
 
   // Atualiza a Tag/Status da Sessão
-  async updateSessionStatus(sessionKey: string, status: 'NOVO_ATENDIMENTO' | 'EM_ANDAMENTO' | 'AGUARDANDO_PAGAMENTO' | 'ATENDIMENTO_HUMANO' | 'FINALIZADO' | 'CANCELADO') {
-    
+  async updateSessionStatus(
+    sessionKey: string,
+    status:
+      | 'NOVO_ATENDIMENTO'
+      | 'EM_ANDAMENTO'
+      | 'AGUARDANDO_PAGAMENTO'
+      | 'ATENDIMENTO_HUMANO'
+      | 'FINALIZADO'
+      | 'CANCELADO',
+  ) {
     // 1. Atualiza no Prisma
     const session = await prisma.chatSession.update({
       where: { sessionKey },
-      data: { 
+      data: {
         status,
-       
-        ...(status === 'FINALIZADO' || status === 'CANCELADO' ? { isActive: true } : {}) 
-      }
+        isActive: status !== 'ATENDIMENTO_HUMANO',
+        handoffRequestedAt: status === 'ATENDIMENTO_HUMANO' ? new Date() : null,
+      },
     });
+
+    const workerSessionKey = `chat:session:${sessionKey}`;
+    const sessionCache = await (redis as any).get(workerSessionKey);
+    if (sessionCache) {
+      const parsedSession = JSON.parse(sessionCache);
+      parsedSession.isActive = session.isActive;
+      await (redis as any).set(workerSessionKey, JSON.stringify(parsedSession), 'EX', 86400);
+    }
 
     // 2. Limpa o cache da listagem da API (o que você já tinha)
     if (this.clearCache) {
@@ -171,9 +225,8 @@ async toggleStatus(id: string, isActive: boolean) {
 
     // 3. 👉 A AMNÉSIA: Se finalizou, limpa a memória da IA no Redis
     if (status === 'FINALIZADO' || status === 'CANCELADO') {
-      const workerSessionKey = `chat:session:${sessionKey}`;
       const workerHistoryKey = `chat:history:${sessionKey}`;
-      
+
       try {
         await (redis as any).del(workerSessionKey);
         await (redis as any).del(workerHistoryKey);
@@ -197,26 +250,43 @@ async toggleStatus(id: string, isActive: boolean) {
     if (mimeType.startsWith('image/')) {
       await this.whatsapp.sendImageMessage(session.sessionKey, mediaUrl);
       contentFormatado = `[IMG:${mediaUrl}]`;
-    } 
-    else if (mimeType.startsWith('audio/')) {
+    } else if (mimeType.startsWith('audio/')) {
       // ⚠️ Certifique-se de ter o método sendAudioMessage no seu WhatsAppIntegrationService
-      await this.whatsapp.sendAudioMessage(session.sessionKey, mediaUrl); 
+      await this.whatsapp.sendAudioMessage(session.sessionKey, mediaUrl);
       contentFormatado = `[AUDIO:${mediaUrl}]`;
-    } 
-    else {
+    } else {
       // ⚠️ Certifique-se de ter o método sendDocumentMessage no seu WhatsAppIntegrationService
       await this.whatsapp.sendDocumentMessage(session.sessionKey, mediaUrl, fileName);
       contentFormatado = `[DOC:${mediaUrl}] ${fileName}`;
     }
 
     // 2. Salva no banco com a Tag Mágica para o Frontend ler depois
-    const newMessage = await prisma.chatMessage.create({
-      data: {
-        sessionId,
-        role: 'ASSISTANT',
-        content: contentFormatado
-      }
-    });
+    const [, newMessage] = await prisma.$transaction([
+      prisma.chatSession.update({
+        where: { id: sessionId },
+        data: {
+          isActive: false,
+          status: 'ATENDIMENTO_HUMANO',
+          handoffRequestedAt: session.handoffRequestedAt ?? new Date(),
+          updatedAt: new Date(),
+        },
+      }),
+      prisma.chatMessage.create({
+        data: {
+          sessionId,
+          role: 'ASSISTANT',
+          content: contentFormatado,
+        },
+      }),
+    ]);
+
+    const workerRedisKey = `chat:session:${session.sessionKey}`;
+    const sessionCache = await (redis as any).get(workerRedisKey);
+    if (sessionCache) {
+      const parsedSession = JSON.parse(sessionCache);
+      parsedSession.isActive = false;
+      await (redis as any).set(workerRedisKey, JSON.stringify(parsedSession), 'EX', 86400);
+    }
 
     await this.clearCache();
     return newMessage;
