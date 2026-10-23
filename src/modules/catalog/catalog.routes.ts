@@ -14,6 +14,7 @@ import {
   kitQuerySchema,
   updateKitSchema,
 } from './catalog.schemas.js';
+import { syncProductLabelSchema } from './productFacts/product-facts.schemas.js';
 
 // Imports dos Controllers
 import { CategoryController } from './categories/category.controller.js';
@@ -103,6 +104,43 @@ export async function catalogRoutes(app: FastifyInstance) {
       },
     },
     productController.create.bind(productController),
+  );
+
+  app.withTypeProvider<ZodTypeProvider>().get(
+    '/products/:id',
+    {
+      schema: {
+        tags: ['Catálogo - Produtos'],
+        summary: 'Retorna o produto e seus fatos oficiais de rótulo',
+        params: idParamSchema,
+      },
+    },
+    productController.detail.bind(productController),
+  );
+
+  app.withTypeProvider<ZodTypeProvider>().get(
+    '/products/:id/label',
+    {
+      schema: {
+        tags: ['Catálogo - Produtos'],
+        summary: 'Retorna os fatos de rótulo do produto',
+        params: idParamSchema,
+      },
+    },
+    productController.labelFacts.bind(productController),
+  );
+
+  app.withTypeProvider<ZodTypeProvider>().post(
+    '/products/:id/sync-label',
+    {
+      schema: {
+        tags: ['Catálogo - Produtos'],
+        summary: 'Sincroniza fatos literais no domínio oficial do fabricante',
+        params: idParamSchema,
+        body: syncProductLabelSchema,
+      },
+    },
+    productController.syncLabel.bind(productController),
   );
 
   app.withTypeProvider<ZodTypeProvider>().put(

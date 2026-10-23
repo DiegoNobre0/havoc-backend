@@ -10,6 +10,10 @@ export class WhatsAppIntegrationService {
     // Garante que só temos números
     let cleanPhone = phone.replace(/\D/g, '');
 
+    if (cleanPhone.length === 10 || cleanPhone.length === 11) {
+      cleanPhone = `55${cleanPhone}`;
+    }
+
     // Verifica se é do Brasil (55) e se tem exatamente 12 dígitos (falta o 9)
     // Exemplo de entrada: 55 71 81482521 (12 dígitos)
     if (cleanPhone.startsWith('55') && cleanPhone.length === 12) {
@@ -24,8 +28,9 @@ export class WhatsAppIntegrationService {
 
   async sendTextMessage(to: string, text: string) {
     if (!this.token || !this.phoneId) {
-      console.error('⚠️ Credenciais do WhatsApp (META_ACCESS_TOKEN ou META_PHONE_ID) não configuradas no .env');
-      return;
+      const error = 'Credenciais do WhatsApp não configuradas.';
+      console.error(error);
+      return { sent: false as const, error };
     }
 
     // 1. Aplica a formatação do número antes de enviar
@@ -35,7 +40,7 @@ export class WhatsAppIntegrationService {
       const response = await fetch(this.apiUrl, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.token}`,
+          Authorization: `Bearer ${this.token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -52,13 +57,71 @@ export class WhatsAppIntegrationService {
 
       if (!response.ok) {
         const errorData = await response.json();
-        console.error(`[WhatsApp Send Error - Number: ${formattedTo}]:`, JSON.stringify(errorData, null, 2));
+        console.error(
+          `[WhatsApp Send Error - Number: ${formattedTo}]:`,
+          JSON.stringify(errorData, null, 2),
+        );
+        return { sent: false as const, error: JSON.stringify(errorData) };
       } else {
-        // Um logzinho de sucesso ajuda muito a debugar!
+        const responseData = (await response.json()) as { messages?: Array<{ id?: string }> };
         console.log(`[WhatsApp] ✅ Mensagem enviada com sucesso para ${formattedTo}`);
+        return { sent: true as const, messageId: responseData.messages?.[0]?.id };
       }
     } catch (error) {
       console.error('[WhatsApp HTTP Error]:', error);
+      return {
+        sent: false as const,
+        error: error instanceof Error ? error.message : 'Falha HTTP desconhecida.',
+      };
+    }
+  }
+
+  async sendTemplateMessage(to: string, templateName: string, bodyParameters: string[]) {
+    if (!this.token || !this.phoneId) {
+      return { sent: false as const, error: 'Credenciais do WhatsApp não configuradas.' };
+    }
+
+    const formattedTo = this.formatPhoneNumber(to);
+    try {
+      const response = await fetch(this.apiUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: formattedTo,
+          type: 'template',
+          template: {
+            name: templateName,
+            language: { code: 'pt_BR' },
+            components: [
+              {
+                type: 'body',
+                parameters: bodyParameters.map((text) => ({ type: 'text', text })),
+              },
+            ],
+          },
+        }),
+      });
+      const responseData = (await response.json()) as {
+        messages?: Array<{ id?: string }>;
+        error?: { message?: string };
+      };
+      if (!response.ok) {
+        return {
+          sent: false as const,
+          error: responseData.error?.message ?? JSON.stringify(responseData),
+        };
+      }
+      return { sent: true as const, messageId: responseData.messages?.[0]?.id };
+    } catch (error) {
+      return {
+        sent: false as const,
+        error: error instanceof Error ? error.message : 'Falha HTTP desconhecida.',
+      };
     }
   }
 
@@ -69,7 +132,7 @@ export class WhatsAppIntegrationService {
     try {
       // 1. Pega a URL do arquivo usando o ID
       const urlResponse = await fetch(`https://graph.facebook.com/v19.0/${mediaId}`, {
-        headers: { 'Authorization': `Bearer ${this.token}` }
+        headers: { Authorization: `Bearer ${this.token}` },
       });
 
       if (!urlResponse.ok) throw new Error('Falha ao obter URL da mídia');
@@ -77,14 +140,13 @@ export class WhatsAppIntegrationService {
 
       // 2. Faz o download dos bytes (Buffer) do arquivo
       const mediaResponse = await fetch(urlData.url, {
-        headers: { 'Authorization': `Bearer ${this.token}` }
+        headers: { Authorization: `Bearer ${this.token}` },
       });
 
       if (!mediaResponse.ok) throw new Error('Falha ao baixar arquivo');
 
       const arrayBuffer = await mediaResponse.arrayBuffer();
       return Buffer.from(arrayBuffer);
-
     } catch (error) {
       console.error('[Meta Media Download Error]:', error);
       return null;
@@ -99,8 +161,10 @@ export class WhatsAppIntegrationService {
 
     // Verifica se a URL é válida para a web
     if (!imageUrl || !imageUrl.startsWith('http')) {
-      console.warn(`[WhatsApp] ⚠️ URL de imagem inválida ou local (${imageUrl}). Convertendo para mensagem de texto.`);
-      
+      console.warn(
+        `[WhatsApp] ⚠️ URL de imagem inválida ou local (${imageUrl}). Convertendo para mensagem de texto.`,
+      );
+
       // Se tinha alguma legenda junto com a foto quebrada, envia só a legenda para não perder a resposta
       if (caption) {
         await this.sendTextMessage(to, caption);
@@ -112,7 +176,7 @@ export class WhatsAppIntegrationService {
       const response = await fetch(this.apiUrl, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.token}`,
+          Authorization: `Bearer ${this.token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -122,7 +186,7 @@ export class WhatsAppIntegrationService {
           type: 'image',
           image: {
             link: imageUrl,
-            caption: caption // Opcional: Texto junto com a foto
+            caption: caption, // Opcional: Texto junto com a foto
           },
         }),
       });
@@ -138,34 +202,34 @@ export class WhatsAppIntegrationService {
     }
   }
 
-async sendInteractiveImageMessage(
+  async sendInteractiveImageMessage(
     to: string,
     bodyText: string,
     imageUrl: string,
-    buttons: { id: string; title: string }[]
+    buttons: { id: string; title: string }[],
   ) {
     if (!this.token || !this.phoneId) return;
 
     const formattedTo = this.formatPhoneNumber(to);
 
-    const safeButtons = buttons.map(btn => ({
+    const safeButtons = buttons.map((btn) => ({
       type: 'reply',
       reply: {
         id: btn.id.substring(0, 256),
         title: btn.title.substring(0, 20),
-      }
+      },
     }));
 
     const interactivePayload: any = {
       type: 'button',
       body: { text: bodyText.substring(0, 1024) },
-      action: { buttons: safeButtons }
+      action: { buttons: safeButtons },
     };
 
     if (imageUrl) {
       interactivePayload.header = {
         type: 'image',
-        image: { link: imageUrl }
+        image: { link: imageUrl },
       };
     }
 
@@ -173,7 +237,7 @@ async sendInteractiveImageMessage(
       const response = await fetch(this.apiUrl, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.token}`,
+          Authorization: `Bearer ${this.token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -181,21 +245,22 @@ async sendInteractiveImageMessage(
           recipient_type: 'individual',
           to: formattedTo,
           type: 'interactive',
-          interactive: interactivePayload
+          interactive: interactivePayload,
         }),
       });
 
       if (!response.ok) {
         const err = await response.json();
         console.error('[WhatsApp Buttons Error]:', JSON.stringify(err, null, 2));
-        
+
         // 🔥 O PULO DO GATO: FALLBACK AUTOMÁTICO 🔥
         // Se der erro (ex: imagem 404 quebrada), ele engole o erro e tenta de novo SÓ COM TEXTO E BOTÕES
         if (err.error?.message?.includes('Media upload error') || err.error?.code === 131053) {
-           console.log(`[WhatsApp Fallback] ⚠️ Imagem falhou. Reenviando apenas texto e botões para ${formattedTo}...`);
-           await this.sendInteractiveTextMessage(to, bodyText, buttons);
+          console.log(
+            `[WhatsApp Fallback] ⚠️ Imagem falhou. Reenviando apenas texto e botões para ${formattedTo}...`,
+          );
+          await this.sendInteractiveTextMessage(to, bodyText, buttons);
         }
-
       } else {
         console.log(`[WhatsApp] 🔘 Imagem + Botões enviados com sucesso para ${formattedTo}`);
       }
@@ -205,21 +270,25 @@ async sendInteractiveImageMessage(
   }
 
   // 👉 PLANO B: Envia apenas o texto e os botões se a imagem falhar
-  async sendInteractiveTextMessage(to: string, bodyText: string, buttons: { id: string; title: string }[]) {
+  async sendInteractiveTextMessage(
+    to: string,
+    bodyText: string,
+    buttons: { id: string; title: string }[],
+  ) {
     const formattedTo = this.formatPhoneNumber(to);
-    const safeButtons = buttons.map(btn => ({
+    const safeButtons = buttons.map((btn) => ({
       type: 'reply',
       reply: {
         id: btn.id.substring(0, 256),
         title: btn.title.substring(0, 20),
-      }
+      },
     }));
 
     try {
       const response = await fetch(this.apiUrl, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.token}`,
+          Authorization: `Bearer ${this.token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -230,8 +299,8 @@ async sendInteractiveImageMessage(
           interactive: {
             type: 'button',
             body: { text: bodyText.substring(0, 1024) },
-            action: { buttons: safeButtons }
-          }
+            action: { buttons: safeButtons },
+          },
         }),
       });
 
@@ -244,7 +313,6 @@ async sendInteractiveImageMessage(
       console.error(err);
     }
   }
-
 
   // ==========================================
   // 👉 ENVIAR ÁUDIO
@@ -264,7 +332,7 @@ async sendInteractiveImageMessage(
       const response = await fetch(this.apiUrl, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.token}`,
+          Authorization: `Bearer ${this.token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -273,7 +341,7 @@ async sendInteractiveImageMessage(
           to: formattedTo,
           type: 'audio',
           audio: {
-            link: audioUrl
+            link: audioUrl,
           },
         }),
       });
@@ -306,7 +374,7 @@ async sendInteractiveImageMessage(
       const response = await fetch(this.apiUrl, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.token}`,
+          Authorization: `Bearer ${this.token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -316,7 +384,7 @@ async sendInteractiveImageMessage(
           type: 'document',
           document: {
             link: documentUrl,
-            filename: fileName || 'documento' // Fallback caso não venha nome
+            filename: fileName || 'documento', // Fallback caso não venha nome
           },
         }),
       });

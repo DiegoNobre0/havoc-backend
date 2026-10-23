@@ -1,9 +1,131 @@
 import { prisma } from '../../database/prisma.js';
-import { PaymentsService } from '../../modules/payments/payments.service.js';
 import { redis } from '../../shared/redis/redis.js';
-import { io } from '../../shared/socket/socket.js';
+import { AppError } from '../../shared/errors/AppError.js';
+import {
+  findConsultantCandidates,
+  listConsultantCategories,
+  type ConsultantCandidate,
+} from '../../modules/storefrontConsultant/storefrontConsultant.catalog.js';
+import { generateConsultantAnswer } from '../../modules/storefrontConsultant/storefrontConsultant.ai.js';
+import {
+  HEALTH_RISK_RESPONSE,
+  HEALTH_SCREEN_QUESTION,
+  planConsultantIntent,
+} from '../../modules/storefrontConsultant/storefrontConsultant.intent.js';
+import {
+  detectFactIntents,
+  formatOfficialFactsResponse,
+  publishableLabelFacts,
+  resolveSingleProductCandidate,
+} from '../../modules/storefrontConsultant/storefrontConsultant.facts.js';
+import { ProductFactsService } from '../../modules/catalog/productFacts/product-facts.service.js';
+import {
+  researchExactProductUsage,
+  researchExactProductProfile,
+  researchGeneralQuestion,
+  wantsResearchSources,
+} from '../../modules/storefrontConsultant/storefrontConsultant.research.js';
+
+function catalogUrl(pathname: string): string | null {
+  const configuredUrl = process.env.STOREFRONT_URL?.trim();
+  if (!configuredUrl) return null;
+
+  try {
+    const baseUrl = new URL(configuredUrl);
+    if (!['http:', 'https:'].includes(baseUrl.protocol)) return null;
+    return new URL(pathname, `${baseUrl.toString().replace(/\/$/, '')}/`).toString();
+  } catch {
+    return null;
+  }
+}
+
+function trustedImageUrl(value: string | null) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 export class ChatbotContext {
+  private readonly productFactsService = new ProductFactsService();
+
+  async recomendarProdutos(
+    pergunta: string,
+    historico: Array<{ role: string; content: string }>,
+  ): Promise<string | null> {
+    const categories = await listConsultantCategories();
+    const userHistory = historico
+      .filter(({ role }) => role.toLowerCase() === 'user')
+      .map(({ content }) => content);
+    const plan = await planConsultantIntent(pergunta, userHistory, categories);
+    if (!plan?.isRecommendationRequest) return null;
+    if (plan.healthScreen === 'needs_screening') return HEALTH_SCREEN_QUESTION;
+    if (plan.healthScreen === 'risk') return HEALTH_RISK_RESPONSE;
+
+    let candidates = await findConsultantCandidates(pergunta, { surface: 'catalog' }, [], {
+      categorySlugs: plan.categorySlugs,
+      catalogTerms: plan.catalogTerms,
+    });
+    const profiles = new Map<string, Awaited<ReturnType<typeof researchExactProductProfile>>>();
+    if (plan.requiresComposition) {
+      await Promise.all(
+        candidates
+          .filter((candidate) => candidate.type === 'product')
+          .slice(0, 4)
+          .map(async (candidate) => {
+            const profile = await researchExactProductProfile(candidate.name);
+            if (profile) profiles.set(candidate.id, profile);
+          }),
+      );
+    }
+    if (plan.avoidsStimulants) {
+      candidates = candidates.filter(
+        (candidate) =>
+          candidate.type === 'product' &&
+          (profiles.get(candidate.id)?.stimulant === 'absent' ||
+            /\bsem\s+cafe[ií]na\b/i.test(`${candidate.name} ${candidate.description}`)),
+      );
+      if (candidates.length === 0) {
+        return 'Não encontrei no catálogo uma opção relacionada ao seu objetivo cuja ausência de cafeína ou outros estimulantes eu consiga confirmar. Prefiro não indicar um produto sem essa confirmação.';
+      }
+    }
+
+    const answer = await generateConsultantAnswer(
+      pergunta,
+      candidates,
+      historico.slice(-8).map(({ role, content }) => ({
+        role: role.toLowerCase() === 'user' ? 'USER' : 'ASSISTANT',
+        content,
+      })),
+      new Map([...profiles.entries()].flatMap(([id, profile]) => (profile ? [[id, profile]] : []))),
+    );
+    const selected = new Map(
+      candidates.map((candidate) => [`${candidate.type}:${candidate.id}`, candidate]),
+    );
+    const products = answer.recommendationKeys
+      .map((key) => selected.get(key))
+      .filter((candidate): candidate is ConsultantCandidate => Boolean(candidate));
+    if (products.length === 0) return answer.content;
+
+    const lines = [answer.content, ''];
+    for (const product of products) {
+      lines.push(`*${product.name}*`, `R$ ${product.price.toFixed(2)}`);
+      const imageUrl = trustedImageUrl(product.imageUrl);
+      if (imageUrl) lines.push(`[IMG:${imageUrl}]`);
+      const url = catalogUrl(
+        product.type === 'kit'
+          ? `/kit/${encodeURIComponent(product.slug)}`
+          : `/produto/${encodeURIComponent(product.slug)}`,
+      );
+      if (url) lines.push(`[CATALOG_URL:${url}]`);
+      lines.push('');
+    }
+    return lines.join('\n').trim();
+  }
+
   // 1. Busca os Produtos e Categorias ativas com estoque
   async getMenuContext(): Promise<string> {
     const categories = await prisma.category.findMany({
@@ -38,7 +160,7 @@ export class ChatbotContext {
 
   // 2. Busca os Kits Promocionais ativos
   async getPromoKitsContext(): Promise<string> {
-    const cacheKey = 'chatbot:catalogo:kits_promocionais';
+    const cacheKey = `chatbot:catalogo:kits_promocionais:v2:${process.env.STOREFRONT_URL ? 'links' : 'texto'}`;
 
     // 1. Tenta buscar no Redis O(1)
     const cached = await redis.get(cacheKey);
@@ -61,34 +183,14 @@ export class ChatbotContext {
       const itemsList = kit.items.map((i) => `${i.quantity}x ${i.product.name}`).join(', ');
       text += `${index + 1}. *${kit.name}*: R$ ${Number(kit.finalPrice).toFixed(2)}\n`;
       text += `Composição: ${itemsList}\n\n`;
+      const url = catalogUrl(`/kit/${encodeURIComponent(kit.slug)}`);
+      if (url) text += `[CATALOG_URL:${url}]\n`;
     });
 
     // 3. Salva o texto pronto no Redis por 1 hora (3600 segundos)
     await redis.set(cacheKey, text, 'EX', 3600);
 
     return text;
-  }
-
-  // 3. Busca pedidos em andamento pelo telefone do cliente
-  async getOrderStatus(phone: string): Promise<string> {
-    const orders = await prisma.order.findMany({
-      where: {
-        client: { phone },
-        status: { notIn: ['DELIVERED', 'CANCELLED'] },
-      },
-      select: { id: true, status: true, total: true },
-    });
-
-    if (orders.length === 0) {
-      return 'Você não possui pedidos em andamento no momento.';
-    }
-
-    return orders
-      .map(
-        (order) =>
-          `Pedido #${order.id.split('-')[0].toUpperCase()} | Status: ${order.status} | Total: R$ ${Number(order.total).toFixed(2)}`,
-      )
-      .join('\n');
   }
 
   async buscarProdutos(termoBusca: string): Promise<string> {
@@ -132,209 +234,6 @@ export class ChatbotContext {
     return text;
   }
 
-  async gerarCheckout(sessionKey: string, dadosCheckout: any): Promise<string> {
-    try {
-      // 1. Busca o nome do cliente que foi capturado na sessão do Chatbot
-      const chatSession = await prisma.chatSession.findUnique({
-        where: { sessionKey },
-      });
-
-      const customerName = chatSession?.customerName || 'Cliente WhatsApp';
-      const customerPhone = sessionKey; // O número do WhatsApp é a própria sessionKey
-
-      let subtotal = 0;
-      const orderItemsData = [];
-      const itensNaoEncontrados = [];
-
-      // 2. Itera sobre os produtos/kits que a IA enviou
-      for (const item of dadosCheckout.produtos) {
-        // 👉 A BLINDAGEM: Tenta pegar 'quantidade', se vier 'quantity' ele pega também, se vier vazio, assume 1.
-        const qtd = Number(item.quantidade || item.quantity || 1);
-
-        // --- TENTATIVA 1: É UM PRODUTO ISOLADO? ---
-        const produtoBanco = await prisma.product.findFirst({
-          where: { name: { contains: item.nome_produto, mode: 'insensitive' } },
-        });
-
-        if (produtoBanco) {
-          const itemTotal = Number(produtoBanco.price) * qtd;
-          subtotal += itemTotal;
-
-          orderItemsData.push({
-            productId: produtoBanco.id,
-            quantity: qtd, // Usa a variável blindada
-            unitPrice: produtoBanco.price,
-            totalPrice: itemTotal,
-          });
-          continue;
-        }
-
-        // --- TENTATIVA 2: É UM KIT PROMOCIONAL? ---
-        const kitBanco = await prisma.kit.findFirst({
-          where: { name: { contains: item.nome_produto, mode: 'insensitive' } },
-          include: { items: true },
-        });
-
-        if (kitBanco) {
-          const itemTotal = Number(kitBanco.finalPrice) * qtd;
-          subtotal += itemTotal;
-
-          for (const kitItem of kitBanco.items) {
-            orderItemsData.push({
-              productId: kitItem.productId,
-              quantity: kitItem.quantity * qtd, // Usa a variável blindada
-              unitPrice: 0,
-              totalPrice: 0,
-            });
-          }
-          continue;
-        }
-
-        itensNaoEncontrados.push(item.nome_produto);
-      }
-
-      if (itensNaoEncontrados.length > 0) {
-        return `Tivemos um problema para validar os seguintes itens no estoque: ${itensNaoEncontrados.join(', ')}. Peça desculpas e peça para o cliente confirmar os nomes exatos.`;
-      }
-
-      // 3. Calcula Frete Fixo e define o endereço completo
-      const deliveryAddress =
-        dadosCheckout.metodo_entrega === 'ENTREGA' ? dadosCheckout.endereco_ou_cep : null;
-      let frete = 0.0;
-
-      if (deliveryAddress) {
-        const inputLimpo = deliveryAddress.toLowerCase();
-        let rule = null;
-
-        // Tenta achar por Bairro (Region)
-        const regras = await prisma.shippingRule.findMany({
-          where: { isActive: true, region: { not: null } },
-        });
-        rule = regras.find((r) => inputLimpo.includes(String(r.region).toLowerCase())) || null;
-
-        // Tenta Taxa Padrão (Sem Region)
-        if (!rule) {
-          rule = await prisma.shippingRule.findFirst({
-            where: { isActive: true, region: null },
-            orderBy: { price: 'asc' },
-          });
-        }
-
-        frete = rule ? Number(rule.price) : 15.0; // Usa 15 como segurança se o DB estiver vazio
-      }
-
-      const total = subtotal + frete;
-
-      // 4. CRIA O PEDIDO NO BANCO COM OS NOVOS CAMPOS DO CLIENTE E ENDEREÇO
-      const novoPedido = await prisma.order.create({
-        data: {
-          code: `HAV-${Math.floor(10000 + Math.random() * 90000)}`,
-          status: 'PENDING',
-          customerName,
-          customerPhone,
-          deliveryAddress,
-          subtotal,
-          shippingCost: frete,
-          total,
-          notes: dadosCheckout.notes || null,
-          items: {
-            create: orderItemsData,
-          },
-          statusHistory: {
-            create: [{ status: 'PENDING', note: 'Pedido gerado via WhatsApp (IA)' }],
-          },
-        },
-      });
-
-      await prisma.chatSession.update({
-        where: { sessionKey },
-        data: { status: 'AGUARDANDO_PAGAMENTO' },
-      });
-
-      // 🔥 5. INTEGRAÇÃO MERCADO PAGO / SICREDI: Desativada temporariamente para testes 🔥
-      let pixCopiaECola = '';
-      let linkPagamento = '';
-
-      const paymentsService = new PaymentsService(); // Instanciando o motor real
-
-      if (dadosCheckout.metodo_pagamento === 'PIX') {
-        const pixData = await paymentsService.generatePix(
-          novoPedido.id,
-          'cliente@havoc.com.br',
-          customerName,
-        );
-        pixCopiaECola = pixData.pixCode || '';
-      } else if (dadosCheckout.metodo_pagamento === 'CARTAO') {
-        const linkData = await paymentsService.generateLink(novoPedido.id);
-        linkPagamento = linkData.paymentLink || '';
-      }
-
-      // 6. DEVOLVE O TEXTO PRONTO PARA A IA MANDAR PRO CLIENTE
-      let textoResposta = `✅ *Pedido #${novoPedido.code} Gerado com Sucesso!*\n\n`;
-      textoResposta += `*Resumo da Compra:*\n`;
-
-      dadosCheckout.produtos.forEach((p: any) => {
-        // Protege também na hora de imprimir no WhatsApp
-        const printQtd = p.quantidade || p.quantity || 1;
-        textoResposta += `- ${printQtd}x ${p.nome_produto}\n`;
-      });
-
-      textoResposta += `\nSubtotal: R$ ${subtotal.toFixed(2)}`;
-      textoResposta += `\nFrete: R$ ${frete.toFixed(2)}`;
-      textoResposta += `\n*TOTAL: R$ ${total.toFixed(2)}*\n\n`;
-
-      // 7. INJETA O QR CODE E AS INSTRUÇÕES DE PAGAMENTO NO FINAL
-      if (dadosCheckout.metodo_pagamento === 'PIX') {
-        textoResposta += `👇 *PAGAMENTO VIA PIX* 👇\n`;
-        textoResposta += `Utilize a chave copia-e-cola abaixo para finalizar:\n\n`;
-        textoResposta += `[PIX:${pixCopiaECola}]\n\n`;
-        textoResposta += `Assim que o pagamento for aprovado, nosso sistema confirma tudo automaticamente por aqui! 🚀`;
-      } else if (dadosCheckout.metodo_pagamento === 'CARTAO') {
-        textoResposta += `💳 *PAGAMENTO NO CARTÃO* 💳\n`;
-        textoResposta += `Acesse seu link seguro para finalizar a compra:\n\n`;
-        textoResposta += `${linkPagamento}\n\n`;
-        textoResposta += `Após o pagamento, seu pedido será confirmado automaticamente! 🚀`;
-      } else {
-        textoResposta += `💵 Pagamento em dinheiro selecionado. Deixe o valor separado para entregar ao motoboy. Precisa de troco?`;
-      }
-      // 🔥 8. IMPRESSÃO DA VIA: Controle Inteligente 🔥
-      try {
-        if (io) {
-          const cupom = {
-            codigo: novoPedido.code,
-            cliente: customerName,
-            telefone: customerPhone,
-            endereco: deliveryAddress || '>>> RETIRADA BALCÃO <<<',
-            itens: dadosCheckout.produtos.map(
-              (p: any) => `${p.quantidade || p.quantity || 1}x ${p.nome_produto}`,
-            ),
-            total: total,
-            data: new Date().toLocaleString('pt-BR'),
-          };
-
-          if (dadosCheckout.metodo_pagamento === 'DINHEIRO') {
-            io.emit('imprimir_cupom', cupom);
-            console.log(
-              `[Impressão Imediata] 🖨️ Pagamento Físico selecionado. Pedido ${novoPedido.code}`,
-            );
-          } else {
-            console.log(
-              `[Aguardando Pagamento] ⏳ Pedido ${novoPedido.code} retido. Impressão aguardando o Webhook do Mercado Pago.`,
-            );
-          }
-        }
-      } catch (printError) {
-        console.error('[Erro na emissão do cupom]:', printError);
-      }
-
-      // 9. Retorna o texto para a Carol
-      return textoResposta;
-    } catch (error) {
-      console.error('[Erro ao gerar checkout]:', error);
-      return 'Ocorreu um erro interno ao gerar o número do pedido. Avise ao cliente que você vai chamar um humano para finalizar a venda.';
-    }
-  }
-
   private normalizarPalavras(nome: string): string[] {
     const semAcento = nome
       .normalize('NFD')
@@ -351,6 +250,8 @@ export class ChatbotContext {
   }
 
   async listarProdutos(termoBusca: string): Promise<string> {
+    return this.listarProdutosConsultor(termoBusca);
+    /* legacy search retained below temporarily for surrounding WhatsApp behavior */
     // 1. Limpeza inteligente e Tradução Universal de Suplementos
     let termoLimpo = termoBusca
       .normalize('NFD')
@@ -412,7 +313,7 @@ export class ChatbotContext {
     let products = await prisma.product.findMany({
       where: { isActive: true, stock: { gt: 0 }, AND: condicoesAND },
       orderBy: { name: 'asc' },
-      select: { name: true, price: true },
+      select: { name: true, price: true, slug: true },
     });
 
     // 🛡️ SALVA-VIDAS (Fuzzy Search): Se a busca estrita falhou, tenta aproximada
@@ -426,7 +327,7 @@ export class ChatbotContext {
 
       const produtosPossiveis = await prisma.product.findMany({
         where: { isActive: true, stock: { gt: 0 }, OR: condicoesOR },
-        select: { name: true, price: true },
+        select: { name: true, price: true, slug: true },
       });
 
       if (produtosPossiveis.length > 0) {
@@ -459,6 +360,8 @@ export class ChatbotContext {
     let text = `[RESULTADOS DO BANCO DE DADOS]\n`;
     products.forEach((p) => {
       text += `- ${p.name} | R$ ${Number(p.price).toFixed(2)}\n`;
+      const url = catalogUrl(`/produto/${encodeURIComponent(p.slug)}`);
+      if (url) text += `[CATALOG_URL:${url}]\n`;
     });
 
     text += `\n⚠️ INSTRUÇÃO DE SEGURANÇA MÁXIMA PARA A IA (LEI DE SOBREVIVÊNCIA): 
@@ -482,6 +385,61 @@ export class ChatbotContext {
     return text;
   }
 
+  private async listarProdutosConsultor(termoBusca: string): Promise<string> {
+    const products = (await findConsultantCandidates(termoBusca, { surface: 'catalog' })).filter(
+      (candidate) => candidate.type === 'product' && candidate.available,
+    );
+    if (products.length === 0) {
+      return `Não encontrei produtos disponíveis para "${termoBusca}". Não invente produtos; peça outro nome ou categoria.`;
+    }
+
+    let text = '[RESULTADOS VERIFICADOS DO CATÁLOGO]\n';
+    for (const product of products) {
+      const imageUrl = trustedImageUrl(product.imageUrl);
+      if (imageUrl) text += `[IMG:${imageUrl}]\n`;
+      text += `- ${product.name} | R$ ${product.price.toFixed(2)}\n`;
+      const url = catalogUrl(`/produto/${encodeURIComponent(product.slug)}`);
+      if (url) text += `[CATALOG_URL:${url}]\n`;
+    }
+    return `${text}\nApresente somente estes resultados. Não invente dose, composição, sabores ou características.`;
+  }
+
+  async consultarDadosOficiaisProduto(consulta: string): Promise<string> {
+    const candidates = await findConsultantCandidates(consulta, { surface: 'catalog' });
+    let product = resolveSingleProductCandidate(consulta, candidates);
+    if (!product) {
+      const options = candidates
+        .filter((candidate) => candidate.type === 'product')
+        .slice(0, 5)
+        .map((candidate) => candidate.name);
+      return options.length > 0
+        ? `Encontrei mais de um produto: ${options.join('; ')}. Qual produto específico você quer consultar? Os rótulos podem variar.`
+        : 'Não identifiquei um produto específico. Informe o nome exato para consultar os dados oficiais do rótulo.';
+    }
+    if (!product.labelFacts) {
+      try {
+        const synced = await this.productFactsService.syncForConsultant(product.id);
+        product = { ...product, labelFacts: publishableLabelFacts(synced) };
+      } catch (error) {
+        const secondaryUsage = await researchExactProductUsage(product.name, {
+          includeSources: wantsResearchSources(consulta),
+        });
+        if (secondaryUsage) return secondaryUsage;
+        return error instanceof AppError && error.statusCode === 422
+          ? `Encontrei a página oficial de ${product.name}, mas ela não publica um modo de uso que eu possa confirmar. Confira a orientação da embalagem; se quiser, posso explicar o uso geral desse tipo de suplemento.`
+          : `Não encontrei o rótulo oficial exato de ${product.name}. Por segurança, não vou estimar a dose. Posso explicar o uso geral desse tipo de suplemento, mas siga a orientação da embalagem.`;
+      }
+    }
+    return formatOfficialFactsResponse(product, detectFactIntents(consulta));
+  }
+
+  async pesquisarFontesConfiaveis(pergunta: string): Promise<string> {
+    return (
+      (await researchGeneralQuestion(pergunta)) ??
+      'Não consegui consultar fontes institucionais confiáveis agora. Tente novamente em alguns instantes.'
+    );
+  }
+
   async verDetalhesProduto(nomeProduto: string): Promise<string> {
     // Função interna para formatar o Produto
     const formatarProduto = (p: any) => {
@@ -490,7 +448,8 @@ export class ChatbotContext {
       if (img && img.startsWith('http')) text += `[IMG:${img}]\n`;
       text += `📦 *${p.name}*\n💰 *R$ ${Number(p.price).toFixed(2)}*\n`;
       if (p.description) text += `📝 ${p.description}\n`;
-      text += `[CONFIRM:${p.name}]`;
+      const url = catalogUrl(`/produto/${encodeURIComponent(p.slug)}`);
+      if (url) text += `[CATALOG_URL:${url}]`;
       return text;
     };
 
@@ -501,7 +460,8 @@ export class ChatbotContext {
       if (img && img.startsWith('http')) text += `[IMG:${img}]\n`;
       const itens = k.items.map((i: any) => `${i.quantity}x ${i.product.name}`).join(', ');
       text += `🔥 *${k.name}*\n💰 *R$ ${Number(k.finalPrice).toFixed(2)}*\n📝 Composição: ${itens}\n`;
-      text += `[CONFIRM:${k.name}]`;
+      const url = catalogUrl(`/kit/${encodeURIComponent(k.slug)}`);
+      if (url) text += `[CATALOG_URL:${url}]`;
       return text;
     };
 
@@ -667,111 +627,5 @@ export class ChatbotContext {
       console.error('[Excluir Conversa Error]:', error);
       return `erro`;
     }
-  }
-
-  async calcularFrete(enderecoCompleto: string): Promise<string> {
-    const inputLimpo = enderecoCompleto.toLowerCase();
-    let rule = null;
-
-    try {
-      // 1. BUSCA POR BAIRRO (A Mágica da Palavra-Chave)
-      // Pega todas as regras que tem a coluna 'region' preenchida
-      const regrasPorBairro = await prisma.shippingRule.findMany({
-        where: { isActive: true, region: { not: null } },
-      });
-
-      // Varre a lista de regras para ver se o Bairro (region) existe dentro do texto do cliente
-      rule =
-        regrasPorBairro.find((r) => inputLimpo.includes(String(r.region).toLowerCase())) || null;
-
-      // 2. FALLBACK DA TAXA PADRÃO
-      // Se não achou o bairro na mensagem, pega a regra de frete padrão (aquela que tem a region vazia)
-      if (!rule) {
-        rule = await prisma.shippingRule.findFirst({
-          where: { isActive: true, region: null },
-          orderBy: { price: 'asc' },
-        });
-      }
-
-      // 3. FALLBACK DE SEGURANÇA (Caso você esqueça de cadastrar regras no painel)
-      if (!rule) {
-        return `Frete para o endereço informado: R$ 15,00 via Uber Flash. O envio é imediato após a confirmação do pagamento!`;
-      }
-
-      // 4. DEVOLVE O TEXTO DINÂMICO
-      return `Frete para o endereço informado: R$ ${Number(rule.price).toFixed(2).replace('.', ',')} via ${rule.name}. O envio é imediato após a confirmação do pagamento!`;
-    } catch (error) {
-      console.error('[Erro ao calcular frete no DB]:', error);
-      return `Frete para o endereço informado: R$ 15,00 via Uber Flash (valor estimado). O envio é imediato após a confirmação!`;
-    }
-  }
-
-  async removerProdutoDoCarrinho(session: any, nomeProduto: string): Promise<string> {
-    if (!session.carrinho || session.carrinho.length === 0) {
-      return 'Seu carrinho já está vazio.';
-    }
-
-    // Filtra o carrinho removendo o item (busca por aproximação simples)
-    const novoCarrinho = session.carrinho.filter(
-      (item: string) => !item.toLowerCase().includes(nomeProduto.toLowerCase()),
-    );
-
-    if (novoCarrinho.length === session.carrinho.length) {
-      return `Não encontrei o item "${nomeProduto}" no seu carrinho.`;
-    }
-
-    session.carrinho = novoCarrinho;
-    // O saveSession será feito pelo worker após a execução da tool
-
-    if (novoCarrinho.length === 0) {
-      return `Prontinho! Removi o item. Seu carrinho agora está vazio.`;
-    }
-
-    return `Entendido! Removi o item. Seu carrinho atualizado tem: ${novoCarrinho.join(', ')}.`;
-  }
-
-  async cancelarAtendimento(sessionKey: string): Promise<string> {
-    try {
-      // 1. Procura se existe um pedido PENDENTE no banco para esse cliente
-      const order = await prisma.order.findFirst({
-        where: {
-          customerPhone: sessionKey,
-          status: 'PENDING',
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-
-      if (order) {
-        await prisma.order.update({
-          where: { id: order.id },
-          data: { status: 'CANCELLED' },
-        });
-      }
-
-      await prisma.chatSession.updateMany({
-        where: { sessionKey },
-        data: {
-          status: 'CANCELADO',
-          isActive: true,
-          handoffRequestedAt: null,
-        },
-      });
-
-      await (redis as any).del(`chat:session:${sessionKey}`);
-      await (redis as any).del(`chat:history:${sessionKey}`);
-
-      return 'Pedido e atendimento cancelados com sucesso. Se precisar de algo, é só chamar!';
-    } catch (error) {
-      console.error('Erro ao cancelar:', error);
-      return 'Ocorreu um erro ao cancelar, mas já limpei sua sessão.';
-    }
-  }
-
-  private mesmasCategorias(catsA: { name: string }[], catsB: { name: string }[]): boolean {
-    const nomesA = catsA.map((c) => c.name).sort();
-    const nomesB = catsB.map((c) => c.name).sort();
-
-    if (nomesA.length !== nomesB.length) return false;
-    return nomesA.every((nome, i) => nome === nomesB[i]);
   }
 }

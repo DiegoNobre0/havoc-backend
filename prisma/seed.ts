@@ -1,19 +1,50 @@
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
+import { hash } from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🧹 Iniciando limpeza do catálogo...');
+  if (process.env.NODE_ENV === 'production' && !process.env.SEED_ADMIN_PASSWORD) {
+    throw new Error('SEED_ADMIN_PASSWORD é obrigatória para executar o seed em produção.');
+  }
 
-  // A ordem importa: apaga os produtos primeiro, depois as categorias
-  const deletedProducts = await prisma.product.deleteMany();
-  const deletedCategories = await prisma.category.deleteMany();
+  const email = (process.env.SEED_ADMIN_EMAIL || 'admin@havoc.com.br').trim().toLowerCase();
+  const password = process.env.SEED_ADMIN_PASSWORD || 'admin123';
+  const passwordHash = await hash(password, 12);
 
-  console.log(`✅ Tudo limpo!`);
-  console.log(`🗑️ ${deletedProducts.count} produtos apagados.`);
-  console.log(`🗑️ ${deletedCategories.count} categorias apagadas.`);
+  const existingAdmin = await prisma.user.findUnique({ where: { email } });
+
+  if (existingAdmin) {
+    await prisma.user.update({
+      where: { id: existingAdmin.id },
+      data: { isActive: true, deletedAt: null },
+    });
+    console.log(`Administrador local já existente e ativado: ${email}`);
+    return;
+  }
+
+  await prisma.user.create({
+    data: {
+      name: 'Administrador Havoc',
+      email,
+      password: passwordHash,
+      role: 'ADMIN',
+      isActive: true,
+    },
+  });
+
+  console.log(`Administrador local criado: ${email}`);
+  if (!process.env.SEED_ADMIN_PASSWORD) {
+    console.log('Senha local padrão: admin123');
+  }
 }
 
-main().finally(async () => {
-  await prisma.$disconnect();
-});
+main()
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

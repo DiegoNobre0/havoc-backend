@@ -1,9 +1,21 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../database/prisma.js';
 import { AppError } from '../../shared/errors/AppError.js';
 import axiosStatic from 'axios';
 import { io } from '../../shared/socket/socket.js';
 import crypto from 'crypto';
 import { WhatsAppIntegrationService } from '../../integrations/whatsapp/whatsappIntegration.service.js';
+import { mapMercadoPagoStatus, mercadoPagoPaymentId } from './payments.utils.js';
+
+type MercadoPagoPayment = {
+  id: string | number;
+  status?: string;
+  status_detail?: string;
+  external_reference?: string;
+  currency_id?: string;
+  transaction_amount?: string | number;
+  date_approved?: string;
+};
 
 export class PaymentsService {
   // ─── CREDENCIAIS MERCADO PAGO (VIA .ENV) ───────────────────────────
@@ -11,14 +23,19 @@ export class PaymentsService {
   private readonly accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN!;
   private readonly baseUrl = 'https://api.mercadopago.com';
 
-  // Helper para injetar o header de autenticação em todas as requisições
-  private get headers() {
+  private headers(idempotencyKey?: string) {
     return {
       Authorization: `Bearer ${this.accessToken}`,
       'Content-Type': 'application/json',
-      // Opcional: Adiciona um id de idempotência para evitar cobranças duplicadas em falhas de rede
-      'X-Idempotency-Key': crypto.randomUUID(),
+      ...(idempotencyKey && { 'X-Idempotency-Key': idempotencyKey }),
     };
+  }
+
+  private idempotencyKey(orderId: string, operation: 'pix' | 'link', attempt = 'initial') {
+    return crypto
+      .createHash('sha256')
+      .update(`havoc:${operation}:${orderId}:${attempt}`)
+      .digest('hex');
   }
 
   // ==============================================================
@@ -28,23 +45,41 @@ export class PaymentsService {
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new AppError('Pedido não encontrado.', 404);
 
-    const existingPayment = await prisma.payment.findFirst({
-      where: { orderId, method: 'PIX', status: { in: ['PENDING', 'PAID'] } },
-    });
-
-    if (existingPayment?.pixCode) return existingPayment;
+    let existingPayment = await prisma.payment.findUnique({ where: { orderId } });
+    if (existingPayment?.method === 'PIX' && existingPayment.status === 'PAID')
+      return existingPayment;
+    if (
+      existingPayment?.method === 'PIX' &&
+      existingPayment.status === 'PENDING' &&
+      existingPayment.pixCode &&
+      (!existingPayment.expiresAt || existingPayment.expiresAt.getTime() > Date.now())
+    ) {
+      return existingPayment;
+    }
+    if (
+      existingPayment?.method === 'PIX' &&
+      existingPayment.status === 'PENDING' &&
+      existingPayment.expiresAt &&
+      existingPayment.expiresAt.getTime() <= Date.now()
+    ) {
+      existingPayment = await prisma.payment.update({
+        where: { id: existingPayment.id },
+        data: { status: 'EXPIRED', providerStatus: 'expired' },
+      });
+    }
 
     // O MP exige um e-mail. Se for pedido via WhatsApp sem cadastro, usamos um fallback
     const payerEmail = email && email.includes('@') ? email : 'cliente@havocsuplementos.shop';
     const cpfLimpo = cpf ? cpf.replace(/\D/g, '') : null;
 
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
     const payload = {
       transaction_amount: Number(order.total),
       description: `Pedido ${order.code} - Havoc Suplementos`,
       payment_method_id: 'pix',
       external_reference: orderId, // Crucial para vincular o webhook depois
-      // 🔥 A TRAVA AQUI: Força o MP a responder nesta exata URL
-      notification_url: 'https://api.havocsuplementos.shop/payments/webhook',
+      date_of_expiration: expiresAt.toISOString(),
+      notification_url: `${process.env.API_PUBLIC_URL || 'https://api.havocsuplementos.shop'}/payments/webhook`,
       payer: {
         email: payerEmail,
         first_name: name,
@@ -54,11 +89,19 @@ export class PaymentsService {
 
     try {
       const response = await axiosStatic.post(`${this.baseUrl}/v1/payments`, payload, {
-        headers: this.headers,
+        headers: this.headers(
+          this.idempotencyKey(
+            orderId,
+            'pix',
+            existingPayment ? existingPayment.updatedAt.toISOString() : undefined,
+          ),
+        ),
       });
 
       const paymentData = response.data;
       const pixCode = paymentData.point_of_interaction?.transaction_data?.qr_code;
+      const qrCodeBase64 = paymentData.point_of_interaction?.transaction_data?.qr_code_base64;
+      const pixQrCodeUrl = qrCodeBase64 ? `data:image/png;base64,${qrCodeBase64}` : null;
 
       return await prisma.payment.upsert({
         where: { orderId },
@@ -68,15 +111,24 @@ export class PaymentsService {
           amount: order.total,
           status: 'PENDING',
           externalId: String(paymentData.id),
+          providerStatus: paymentData.status ?? 'pending',
+          statusDetail: paymentData.status_detail ?? null,
           pixCode: pixCode,
-          expiresAt: new Date(Date.now() + 30 * 60 * 1000), // PIX expira em 30 min por padrão no MP
+          pixQrCodeUrl,
+          expiresAt,
         },
         update: {
           method: 'PIX',
           status: 'PENDING',
+          amount: order.total,
           externalId: String(paymentData.id),
+          providerStatus: paymentData.status ?? 'pending',
+          statusDetail: paymentData.status_detail ?? null,
           pixCode: pixCode,
-          expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+          pixQrCodeUrl,
+          paymentLink: null,
+          paidAt: null,
+          expiresAt,
         },
       });
     } catch (error: any) {
@@ -88,9 +140,27 @@ export class PaymentsService {
   // ==============================================================
   // 👉 2. GERAR LINK DE PAGAMENTO (CHECKOUT PRO / CARTÃO E BOLETO)
   // ==============================================================
-  async generateLink(orderId: string) {
+  async generateLink(orderId: string, checkoutToken?: string) {
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new AppError('Pedido não encontrado.', 404);
+
+    const existingPayment = await prisma.payment.findUnique({ where: { orderId } });
+    if (
+      existingPayment?.method === 'PAYMENT_LINK' &&
+      ['PENDING', 'PAID'].includes(existingPayment.status) &&
+      existingPayment.paymentLink
+    ) {
+      return existingPayment;
+    }
+
+    const storefrontUrl =
+      process.env.STOREFRONT_URL ||
+      (process.env.NODE_ENV === 'production'
+        ? 'https://havocsuplementos.shop'
+        : 'http://localhost:4200');
+    const returnContext = checkoutToken
+      ? `&orderId=${encodeURIComponent(orderId)}&token=${encodeURIComponent(checkoutToken)}`
+      : '';
 
     const payload = {
       items: [
@@ -103,20 +173,32 @@ export class PaymentsService {
         },
       ],
       external_reference: orderId,
-      // 🔥 A TRAVA AQUI TAMBÉM: Webhook garantido
-      notification_url: 'https://api.havocsuplementos.shop/payments/webhook',
-      // Redireciona o cliente de volta pro seu site após pagar
+      notification_url: `${process.env.API_PUBLIC_URL || 'https://api.havocsuplementos.shop'}/payments/webhook`,
       back_urls: {
-        success: 'https://wa.me/5571981214680?text=Acabei%20de%20pagar%20no%20cartão!',
-        pending: 'https://wa.me/5571981214680?text=Meu%20pagamento%20tá%20em%20análise',
-        failure: 'https://wa.me/5571981214680?text=Deu%20erro%20no%20meu%20cartão,%20me%20ajuda',
+        success: `${storefrontUrl}/checkout?payment=success${returnContext}`,
+        pending: `${storefrontUrl}/checkout?payment=pending${returnContext}`,
+        failure: `${storefrontUrl}/checkout?payment=failure${returnContext}`,
+      },
+      payment_methods: {
+        excluded_payment_types: [
+          { id: 'ticket' },
+          { id: 'bank_transfer' },
+          { id: 'atm' },
+          { id: 'debit_card' },
+        ],
       },
       auto_return: 'approved',
     };
 
     try {
       const response = await axiosStatic.post(`${this.baseUrl}/checkout/preferences`, payload, {
-        headers: this.headers,
+        headers: this.headers(
+          this.idempotencyKey(
+            orderId,
+            'link',
+            existingPayment ? existingPayment.updatedAt.toISOString() : undefined,
+          ),
+        ),
       });
 
       // init_point é o link oficial de produção do Mercado Pago
@@ -130,10 +212,21 @@ export class PaymentsService {
           amount: order.total,
           status: 'PENDING',
           externalId: response.data.id,
+          providerStatus: 'pending',
           paymentLink: paymentLink,
         },
         update: {
+          method: 'PAYMENT_LINK',
+          status: 'PENDING',
+          amount: order.total,
+          externalId: String(response.data.id),
+          providerStatus: 'pending',
+          statusDetail: null,
           paymentLink: paymentLink,
+          pixCode: null,
+          pixQrCodeUrl: null,
+          expiresAt: null,
+          paidAt: null,
         },
       });
     } catch (error: any) {
@@ -146,133 +239,252 @@ export class PaymentsService {
   // 👉 3. PROCESSAR WEBHOOK (COM VALIDAÇÃO DE ASSINATURA)
   // ==============================================================
   async processWebhook(body: any, headers: any) {
-    const type = body.type || body.topic;
+    const type = body.type || body.topic || body.action;
     const paymentId = body.data?.id || body.resource;
 
-    if (type !== 'payment' || !paymentId) return;
+    if (!['payment', 'payment.created', 'payment.updated'].includes(type) || !paymentId) return;
 
     const secret = process.env.MERCADO_PAGO_WEBHOOK_SECRET;
     const signatureHeader = headers['x-signature'];
     const requestId = headers['x-request-id'];
 
-    if (secret && (!signatureHeader || !requestId)) {
+    if (secret && (typeof signatureHeader !== 'string' || typeof requestId !== 'string')) {
       console.error('🚨 [Mercado Pago] Webhook sem assinatura rejeitado!');
-      throw new AppError('Assinatura ausente', 401);
+      throw new AppError('Assinatura ausente ou malformada', 401);
     }
 
-    if (secret && signatureHeader && requestId) {
+    if (secret && typeof signatureHeader === 'string' && typeof requestId === 'string') {
       const tsMatch = signatureHeader.match(/ts=(\d+)/);
-      const v1Match = signatureHeader.match(/v1=([a-f0-9]+)/);
+      const v1Match = signatureHeader.match(/v1=([a-f0-9]{64})/i);
 
-      if (tsMatch && v1Match) {
-        const ts = tsMatch[1];
-        const hash = v1Match[1];
+      if (!tsMatch || !v1Match) throw new AppError('Assinatura malformada', 401);
 
-        // ✅ Garante string pura — número vira "160291108545", não muda nada
-        const idStr = String(paymentId).trim();
-        const reqId = String(requestId).trim();
-
-        const manifest = `id:${idStr};request-id:${reqId};ts:${ts};`;
-
-        const hmac = crypto.createHmac('sha256', secret).update(manifest).digest('hex');
-
-        if (hmac !== hash) {
-          console.error('🚨 [Mercado Pago] Assinatura inválida!');
-          console.error(`  → manifest: ${manifest}`);
-          console.error(`  → esperado: ${hash}`);
-          console.error(`  → calculado: ${hmac}`);
-          throw new AppError('Assinatura inválida', 401);
-        }
+      const manifest = `id:${String(paymentId).trim()};request-id:${String(requestId).trim()};ts:${tsMatch[1]};`;
+      const expectedHash = crypto.createHmac('sha256', secret).update(manifest).digest();
+      const providedHash = Buffer.from(v1Match[1], 'hex');
+      if (
+        providedHash.length !== expectedHash.length ||
+        !crypto.timingSafeEqual(providedHash, expectedHash)
+      ) {
+        throw new AppError('Assinatura inválida', 401);
       }
     }
 
+    const deduplicationKey = crypto
+      .createHash('sha256')
+      .update(`${requestId ?? JSON.stringify(body)}:${type}:${paymentId}`)
+      .digest('hex');
+    const event = await prisma.paymentEvent.upsert({
+      where: { deduplicationKey },
+      create: {
+        deduplicationKey,
+        providerPaymentId: String(paymentId),
+        type,
+        payload: body,
+      },
+      update: {},
+    });
+    if (event.status === 'PROCESSED' || event.status === 'IGNORED') return;
+
     try {
-      // 🛡️ TRAVA 2: CONFIRMAÇÃO DIRETA NA API (Dupla Checagem)
-      const idLimpo = String(paymentId).replace(/\D/g, '');
-
-      const mpResponse = await axiosStatic.get(`${this.baseUrl}/v1/payments/${idLimpo}`, {
-        headers: this.headers,
+      const idLimpo = mercadoPagoPaymentId(paymentId);
+      if (!idLimpo) throw new AppError('Identificador de pagamento inválido.', 400);
+      const result = await this.synchronizeProviderPayment(idLimpo);
+      await prisma.paymentEvent.update({
+        where: { id: event.id },
+        data: {
+          status: result ? 'PROCESSED' : 'IGNORED',
+          ...(result?.paymentId ? { paymentId: result.paymentId } : {}),
+          processedAt: new Date(),
+          error: null,
+        },
       });
+    } catch (error: any) {
+      await prisma.paymentEvent.update({
+        where: { id: event.id },
+        data: {
+          status: 'FAILED',
+          error: error instanceof Error ? error.message : String(error),
+          processedAt: new Date(),
+        },
+      });
+      console.error('[Mercado Pago Webhook Error]: Falha ao processar notificação', error.message);
+      throw error;
+    }
+  }
 
-      const paymentData = mpResponse.data;
+  async reconcileOrderPayment(orderId: string, providerPaymentId?: string) {
+    const payment = await prisma.payment.findUnique({ where: { orderId } });
+    if (!payment || payment.status === 'PAID') return payment;
+    const candidate = providerPaymentId || payment.externalId;
+    if (!candidate || !/^\d+$/.test(candidate)) return payment;
+    await this.synchronizeProviderPayment(candidate, orderId);
+    return prisma.payment.findUnique({ where: { orderId } });
+  }
 
-      if (paymentData.status !== 'approved') return;
+  private async synchronizeProviderPayment(providerPaymentId: string, expectedOrderId?: string) {
+    const mpResponse = await axiosStatic.get(`${this.baseUrl}/v1/payments/${providerPaymentId}`, {
+      headers: this.headers(),
+    });
+    const paymentData = mpResponse.data as MercadoPagoPayment;
+    const orderId = paymentData.external_reference;
+    if (
+      typeof orderId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(orderId) ||
+      (expectedOrderId && expectedOrderId !== orderId)
+    ) {
+      throw new AppError('Referência externa inválida.', 400);
+    }
+    const payment = await prisma.payment.findUnique({
+      where: { orderId },
+      include: { order: true },
+    });
+    if (!payment) throw new AppError('Pagamento do pedido não encontrado.', 404);
+    if (paymentData.currency_id && paymentData.currency_id !== 'BRL') {
+      throw new AppError('Moeda do pagamento inválida.', 400);
+    }
+    let receivedAmount: Prisma.Decimal;
+    try {
+      if (paymentData.transaction_amount === undefined) throw new Error('missing amount');
+      receivedAmount = new Prisma.Decimal(paymentData.transaction_amount);
+    } catch {
+      throw new AppError('Valor do pagamento inválido.', 400);
+    }
+    if (!payment.amount.equals(receivedAmount)) {
+      throw new AppError('Valor do pagamento divergente.', 400);
+    }
 
-      const orderId = paymentData.external_reference;
-      const payment = await prisma.payment.findFirst({ where: { orderId: orderId } });
+    const mappedStatus = mapMercadoPagoStatus(paymentData.status, paymentData.status_detail);
+    if (!mappedStatus) return null;
+    if (
+      mappedStatus === 'PAID' &&
+      (payment.order.status === 'CANCELLED' || payment.order.status === 'REFUNDED')
+    ) {
+      throw new AppError('Pedido cancelado ou reembolsado não pode ser confirmado.', 409);
+    }
 
-      if (!payment || payment.status === 'PAID') return;
-
-      // 1. Atualiza Pagamento
-      await prisma.payment.update({
+    const firstPaidConfirmation = mappedStatus === 'PAID' && payment.status !== 'PAID';
+    const updatedOrder = await prisma.$transaction(async (transaction) => {
+      await transaction.payment.update({
         where: { id: payment.id },
         data: {
-          status: 'PAID',
-          paidAt: new Date(paymentData.date_approved),
-          webhookPayload: paymentData,
+          status: mappedStatus,
+          externalId: String(paymentData.id),
+          providerStatus: paymentData.status ?? null,
+          statusDetail: paymentData.status_detail ?? null,
+          webhookPayload: paymentData as Prisma.InputJsonValue,
+          lastSyncedAt: new Date(),
+          ...(mappedStatus === 'PAID' && {
+            paidAt: paymentData.date_approved ? new Date(paymentData.date_approved) : new Date(),
+          }),
         },
       });
 
-      // 2. Atualiza Pedido E TRÁS OS DADOS PARA O CUPOM
-      const updatedOrder = await prisma.order.update({
-        where: { id: payment.orderId },
-        data: { status: 'CONFIRMED' },
+      if (mappedStatus === 'REFUNDED' && payment.order.status !== 'REFUNDED') {
+        return transaction.order.update({
+          where: { id: orderId },
+          data: {
+            status: 'REFUNDED',
+            statusHistory: {
+              create: { status: 'REFUNDED', note: 'Pagamento reembolsado pelo Mercado Pago.' },
+            },
+          },
+          include: {
+            items: {
+              include: { product: { select: { name: true } }, kit: { select: { name: true } } },
+            },
+          },
+        });
+      }
+      if (firstPaidConfirmation && payment.order.status === 'PENDING') {
+        return transaction.order.update({
+          where: { id: orderId },
+          data: {
+            status: 'CONFIRMED',
+            statusHistory: {
+              create: { status: 'CONFIRMED', note: 'Pagamento confirmado pelo Mercado Pago.' },
+            },
+          },
+          include: {
+            items: {
+              include: { product: { select: { name: true } }, kit: { select: { name: true } } },
+            },
+          },
+        });
+      }
+      return transaction.order.findUnique({
+        where: { id: orderId },
         include: {
           items: {
             include: { product: { select: { name: true } }, kit: { select: { name: true } } },
           },
         },
       });
+    });
 
-      // 3. Notificações e Impressão
-      if (io) {
-        io.to(`order_${payment.orderId}`).emit('payment_confirmed', {
-          orderId: payment.orderId,
-          status: 'PAID',
-        });
-
-        const cupom = {
-          codigo: updatedOrder.code,
-          cliente: updatedOrder.customerName,
-          telefone: updatedOrder.customerPhone,
-          endereco: updatedOrder.deliveryAddress || '>>> RETIRADA BALCÃO <<<',
-          itens: updatedOrder.items.map((i) => `${i.quantity}x ${i.product?.name || i.kit?.name}`),
-          total: updatedOrder.total,
-          data: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
-        };
-
-        io.to('loja_fisica').emit('imprimir_cupom', cupom);
-        console.log(`[Impressão MP] 🖨️ Ordem enviada para a loja: Pedido ${updatedOrder.code}`);
-      }
-
-      try {
-        const whatsapp = new WhatsAppIntegrationService();
-
-        // Descobre se é entrega ou retirada olhando para o endereço
-        const isDelivery =
-          updatedOrder.deliveryAddress !== null &&
-          updatedOrder.deliveryAddress !== '>>> RETIRADA BALCÃO <<<';
-        const primeiroNome = updatedOrder.customerName
-          ? updatedOrder.customerName.split(' ')[0]
-          : 'Cliente';
-
-        let mensagemConfirmacao = '';
-        if (isDelivery) {
-          mensagemConfirmacao = `✅ *PAGAMENTO CONFIRMADO!*\nUhull, ${primeiroNome}! Recebemos o seu pagamento do pedido *#${updatedOrder.code}*. Ele já vai descer pra equipe separar e mandar pra você! 🚀`;
-        } else {
-          mensagemConfirmacao = `✅ *PAGAMENTO CONFIRMADO!*\nMaravilha, ${primeiroNome}! O pagamento do seu pedido *#${updatedOrder.code}* caiu certinho. Ele já vai descer pra equipe preparar sua retirada! 🚀`;
-        }
-
-        await whatsapp.sendTextMessage(updatedOrder.customerPhone, mensagemConfirmacao);
-        console.log(
-          `[WhatsApp] 📲 Mensagem de pagamento confirmado enviada para ${updatedOrder.customerPhone}`,
-        );
-      } catch (zapError) {
-        console.error('[WhatsApp Error] Falha ao enviar confirmação de pagamento:', zapError);
-      }
-    } catch (error: any) {
-      console.error('[Mercado Pago Webhook Error]: Falha ao processar notificação', error.message);
+    if (firstPaidConfirmation && updatedOrder) {
+      await this.publishPaymentConfirmation(payment.id, updatedOrder);
     }
+    return { paymentId: payment.id, status: mappedStatus };
+  }
+
+  private async publishPaymentConfirmation(
+    paymentId: string,
+    order: NonNullable<Awaited<ReturnType<typeof prisma.order.findUnique>>> & {
+      items: Array<{
+        quantity: number;
+        product: { name: string } | null;
+        kit: { name: string } | null;
+      }>;
+    },
+  ) {
+    if (io) {
+      io.to(`order_${order.id}`).emit('payment_confirmed', { orderId: order.id, status: 'PAID' });
+      io.to('loja_fisica').emit('imprimir_cupom', {
+        codigo: order.code,
+        cliente: order.customerName,
+        telefone: order.customerPhone,
+        endereco: order.deliveryAddress || '>>> RETIRADA BALCÃO <<<',
+        itens: order.items.map(
+          (item) => `${item.quantity}x ${item.product?.name || item.kit?.name}`,
+        ),
+        total: order.total,
+        data: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+      });
+    }
+
+    const notification = await prisma.paymentNotification.upsert({
+      where: {
+        paymentId_type_channel: { paymentId, type: 'PAYMENT_CONFIRMED', channel: 'WHATSAPP' },
+      },
+      create: {
+        paymentId,
+        type: 'PAYMENT_CONFIRMED',
+        channel: 'WHATSAPP',
+        recipient: order.customerPhone,
+      },
+      update: { recipient: order.customerPhone },
+    });
+    if (notification.status === 'SENT') return;
+
+    const whatsapp = new WhatsAppIntegrationService();
+    const firstName = order.customerName.split(' ')[0] || 'Cliente';
+    const templateName = process.env.META_PAYMENT_CONFIRMED_TEMPLATE?.trim();
+    const result = templateName
+      ? await whatsapp.sendTemplateMessage(order.customerPhone, templateName, [
+          firstName,
+          order.code,
+        ])
+      : await whatsapp.sendTextMessage(
+          order.customerPhone,
+          `Pagamento confirmado, ${firstName}! Recebemos o pagamento do pedido #${order.code}. Agora ele seguirá para preparação.`,
+        );
+    await prisma.paymentNotification.update({
+      where: { id: notification.id },
+      data: result.sent
+        ? { status: 'SENT', sentAt: new Date(), error: null }
+        : { status: 'FAILED', error: result.error },
+    });
   }
 
   async getPaymentStatus(paymentId: string) {

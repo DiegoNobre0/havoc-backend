@@ -151,7 +151,6 @@ Visão identificou: "${descricao}".
           customerName,
           isActive: dbSession.isActive,
           id: dbSession.id,
-          carrinho: [],
         };
       }
 
@@ -196,11 +195,9 @@ Visão identificou: "${descricao}".
         return;
       }
 
-      const inputLimpo = textoFinal?.trim() || '';
       const textoMinusculo = textoFinal?.toLowerCase() || '';
 
-      // 🛡️ O INTERCEPTADOR SILENCIOSO (Filtro Anti-Chato)
-      // Se o cliente encerrou a conversa e o carrinho está vazio, morre aqui.
+      // Encerra despedidas simples sem acionar o modelo.
       const encerramentos = [
         'certo',
         'ok',
@@ -216,12 +213,9 @@ Visão identificou: "${descricao}".
         'blz',
       ];
 
-      if (
-        encerramentos.includes(textoMinusculo) &&
-        (!session.carrinho || session.carrinho.length === 0)
-      ) {
+      if (encerramentos.includes(textoMinusculo)) {
         console.log(
-          `[Worker] 🤫 Cliente mandou "${textoMinusculo}" sem carrinho. Encerrando chat silenciosamente.`,
+          `[Worker] 🤫 Cliente encerrou a conversa com "${textoMinusculo}". Finalizando sessão.`,
         );
 
         await prisma.chatSession.update({
@@ -238,123 +232,6 @@ Visão identificou: "${descricao}".
         await (redis as any).del(historyKey(sKey));
 
         return; // 👈 O GRANDE SEGREDO: O return para o código aqui! A IA não é chamada e não responde nada.
-      }
-
-      // ── Interceptadores de Botões de Ação ────────────────────
-
-      // 1. Confirmação do Produto ("Sim, é esse!")
-      if (
-        textoFinal?.includes('CONFIRM_YES') ||
-        textoFinal?.includes('[PRODUTO_CONFIRMADO]') ||
-        textoMinusculo.includes('sim, é esse')
-      ) {
-        let nomeProduto = textoFinal
-          .replace('[PRODUTO_CONFIRMADO]', '')
-          .replace('CONFIRM_YES:', '')
-          .trim();
-        if (nomeProduto.includes('Sim, é esse')) nomeProduto = 'Produto Anterior';
-
-        const produtoBanco = await prisma.product.findFirst({
-          where: { name: { equals: nomeProduto, mode: 'insensitive' } },
-        });
-
-        let precoContexto = '';
-        if (produtoBanco) {
-          precoContexto = ` (R$ ${Number(produtoBanco.price).toFixed(2)})`;
-        } else {
-          const kitBanco = await prisma.kit.findFirst({
-            where: { name: { equals: nomeProduto, mode: 'insensitive' } },
-          });
-          if (kitBanco) precoContexto = ` (R$ ${Number(kitBanco.finalPrice).toFixed(2)})`;
-        }
-
-        const itemComPreco = `${nomeProduto}${precoContexto}`;
-
-        textoParaHistorico = `Sim, é esse! Produto: ${itemComPreco}`;
-
-        session.carrinho = session.carrinho || [];
-        session.carrinho.push(itemComPreco);
-        await saveSession(sKey, session);
-
-        const carrinhoTexto = session.carrinho.join(', ');
-
-        textoFinal = `[TAG DO SISTEMA: O cliente clicou no botão "Sim, é esse!" e confirmou o produto]
-O produto "${nomeProduto}" foi salvo no carrinho!
-Carrinho atual: ${carrinhoTexto}
-
-Siga ESTRITAMENTE este formato:
-1. Confirme: "Ótimo! *${nomeProduto}* adicionado ao carrinho! 💪"
-2. Sugira UMA CATEGORIA complementar (ex: Creatina, BCAA, Pré-Treino). NUNCA cite marca ou gramatura.
-3. Pergunte: "Quer dar uma olhada nessa sugestão ou prefere fechar o pedido agora?"
-4. OBRIGATÓRIO na última linha: [SUGESTAO:Nome Do Produto];
-
-Exemplo OBRIGATÓRIO do final da sua resposta:
-Quer dar uma olhada nessa sugestão ou prefere fechar o pedido agora?
-[SUGESTAO:Nome Do Produto]`;
-      }
-
-      // 2. Botão de Ver Sugestão (Upsell)
-      else if (
-        textoFinal?.includes('VER_SUGESTAO_') ||
-        textoFinal?.includes('[VER_SUGESTAO]') ||
-        textoMinusculo.includes('ver sugestão')
-      ) {
-        let termoSugerido = '';
-        if (textoFinal.includes('VER_SUGESTAO_')) {
-          termoSugerido = textoFinal.replace('VER_SUGESTAO_', '').trim();
-        } else if (textoFinal.includes('[VER_SUGESTAO]')) {
-          termoSugerido = textoFinal.replace(/\[VER_SUGESTAO\]/g, '').trim();
-        }
-
-        console.log(
-          `[DEBUG INTERCEPTADOR] Cliente clicou em ver sugestão. Termo capturado: "${termoSugerido}"`,
-        );
-
-        textoParaHistorico = 'Quero ver a sugestão que você me deu.';
-
-        const instrucaoBusca = termoSugerido
-          ? `⚠️ INSTRUÇÃO DO SISTEMA: Você sugeriu "${termoSugerido}". Chame a ferramenta 'listar_produtos' AGORA. DICA VITAL: Não envie a palavra inteira para a ferramenta. Use sua inteligência para enviar apenas a RAIZ da palavra (ex: se for Creatina, envie 'creatin') para o banco encontrar tanto as versões em português quanto as em inglês.`
-          : `⚠️ INSTRUÇÃO DO SISTEMA: Olhe para a sua última mensagem. O que você sugeriu? Chame a ferramenta 'listar_produtos' AGORA buscando por essa sugestão. Lembre-se de enviar apenas a RAIZ da palavra (ex: 'creatin' no lugar de creatina).`;
-
-        textoFinal = `[FORCAR_BUSCA]
-O cliente quer ver as opções da sugestão de upsell.
-${instrucaoBusca}
-NÃO busque o produto anterior (que já está no carrinho).`;
-      }
-
-      // 3. Botão de Ver Outros (Recusou ou quer mais opções)
-      else if (
-        textoFinal?.includes('CONFIRM_NO') ||
-        textoMinusculo.includes('ver outros') ||
-        textoMinusculo.includes('outras opções')
-      ) {
-        textoParaHistorico = 'Quero ver outras opções.';
-        textoFinal = `[FORCAR_BUSCA]
-O cliente quer ver OUTRAS opções da categoria que ele estava olhando.
-Gere os argumentos e chame a ferramenta listar_produtos AGORA buscando mais alternativas. Mostre apenas os produtos REAIS retornados pelo banco.`;
-      }
-
-      // 4. Botão de Finalizar Pedido
-      else if (
-        textoFinal?.includes('CONFIRM_CHECKOUT') ||
-        textoFinal?.includes('[FINALIZAR_PEDIDO]') ||
-        textoMinusculo.includes('finalizar pedido')
-      ) {
-        const carrinhoTexto = (session.carrinho || []).join(', ');
-        textoParaHistorico = 'Quero finalizar o pedido.';
-        textoFinal = `[FINALIZAR_PEDIDO] 
-O cliente clicou no botão para fechar o pedido.
-Carrinho atual: ${carrinhoTexto}.
-⚠️ INSTRUÇÃO DO SISTEMA: Inicie a ETAPA 6 de Checkout.
-- REGRA DE MEMÓRIA: Se você JÁ SABE se é Retirada/Entrega e JÁ SABE a Forma de Pagamento (porque o cliente já informou nesta conversa), PULE as perguntas e gere IMEDIATAMENTE o PASSO 3 (Resumo do Pedido atualizado).
-- Se faltar alguma informação (como endereço ou forma de pagamento), pergunte APENAS o que falta.`;
-      }
-
-      // 5. Botão de Confirmar Resumo (Sim, gerar pedido)
-      else if (textoFinal?.includes('[GERAR_CHECKOUT_AGORA]')) {
-        textoParaHistorico = 'Sim, os dados estão corretos. Pode gerar o pedido!';
-        textoFinal = `[GERAR_CHECKOUT_AGORA] O cliente confirmou o resumo do pedido.
-⚠️ INSTRUÇÃO DO SISTEMA: Chame a ferramenta 'gerar_resumo_e_checkout' IMEDIATAMENTE usando os dados coletados.`;
       }
 
       // ── Histórico + IA ───────────────────────────────────────
@@ -402,9 +279,7 @@ Carrinho atual: ${carrinhoTexto}.
       const shouldResetSession =
         dbSession.status === 'FINALIZADO' || dbSession.status === 'CANCELADO';
 
-      if (shouldResetSession) {
-        session.carrinho = [];
-      } else {
+      if (!shouldResetSession) {
         await saveSession(sKey, session);
       }
 
@@ -450,33 +325,11 @@ Carrinho atual: ${carrinhoTexto}.
 
         console.log(`\n[DEBUG IA RAW] Resposta bruta da IA:\n${aiResponse.content}\n`);
 
-        const confirmMatch = aiResponse.content.match(/\[CONFIRM:([\s\S]*?)\]/i);
-        const productName = confirmMatch?.[1]?.trim() ?? null;
-
-        const sugestaoMatch = aiResponse.content.match(/\[SUG+ESTAO:([\s\S]*?)\]/i);
-        let produtoSugerido = sugestaoMatch ? sugestaoMatch[1].trim() : '';
-        produtoSugerido = produtoSugerido.replace(';', '').trim();
-
-        const pixMatch = aiResponse.content.match(/\[PIX:([\s\S]*?)\]/i);
-        const pixCode = pixMatch ? pixMatch[1].trim() : null;
-
-        const hasFinalConfirmButtons = aiResponse.content.includes('[BOTOES_CONFIRMACAO_FINAL]');
-
-        let finalContent = aiResponse.content
+        const finalContent = aiResponse.content
           .replace(/\[IMG:[\s\S]*?\]/gi, '')
-          .replace(/\[CONFIRM:[\s\S]*?\]/gi, '')
           .replace(/<function[^>]*>[\s\S]*?<\/function>/g, '')
-          .replace(/\[SUGESTAO:[\s\S]*?\]/gi, '')
-          .replace(/\[SUGGESTAO:[\s\S]*?\]/gi, '')
-          .replace(/;/g, '')
-          .replace(/\[PIX:[\s\S]*?\]/gi, '')
-          .replace(/\[BOTOES_CONFIRMACAO_FINAL\]/gi, '')
-          .replace(/\[BOTOES_UPSELL\]/g, '')
+          .replace(/\[CATALOG_URL:(https?:\/\/[^\]]+)\]/gi, '$1')
           .trim();
-
-        const hasUpsellButtons =
-          produtoSugerido !== '' || finalContent.toLowerCase().includes('dar uma olhada');
-        finalContent = finalContent.replace(/\[BOTOES_UPSELL\]/g, '').trim();
 
         if (finalContent) {
           if (!shouldResetSession) {
@@ -513,43 +366,11 @@ Carrinho atual: ${carrinhoTexto}.
           )
           .catch((e) => console.error('[Prisma Background Error]:', e));
 
-        // LÓGICA DE ENVIO MULTIMÍDIA E BOTÕES
-        if (productName) {
-          await whatsapp.sendInteractiveImageMessage(
-            sKey,
-            finalContent || 'O que achou desse?',
-            imagesToSend.length > 0 ? imagesToSend[0] : '',
-            [
-              { id: `CONFIRM_YES:${productName}`, title: '✅ Sim, é esse!' },
-              { id: `CONFIRM_NO_${Date.now()}`, title: '🔄 Ver outros' },
-              { id: `CONFIRM_CHECKOUT_${Date.now()}`, title: '🛒 Finalizar pedido' },
-            ],
-          );
-        } else if (hasFinalConfirmButtons) {
-          await whatsapp.sendInteractiveTextMessage(sKey, finalContent, [
-            { id: `CONFIRM_FINAL_YES`, title: '✅ Sim, gerar pedido' },
-            { id: `CONFIRM_FINAL_NO`, title: '✏️ Alterar pedido' },
-          ]);
-        } else if (hasUpsellButtons) {
-          const idBotaoSugestao = produtoSugerido
-            ? `VER_SUGESTAO_${produtoSugerido}`
-            : `VER_SUGESTAO_FALLBACK`;
-
-          await whatsapp.sendInteractiveImageMessage(sKey, finalContent, '', [
-            { id: idBotaoSugestao, title: '👀 Ver sugestão' },
-            { id: `CONFIRM_CHECKOUT_${Date.now()}`, title: '🛒 Finalizar pedido' },
-          ]);
-        } else {
-          for (const imgUrl of imagesToSend) {
-            await whatsapp.sendImageMessage(sKey, imgUrl);
-          }
-          if (finalContent) {
-            await whatsapp.sendTextMessage(sKey, finalContent);
-          }
-          if (pixCode) {
-            await whatsapp.sendTextMessage(sKey, pixCode);
-            console.log(`[WhatsApp] 💸 Código PIX enviado separado para ${sKey}`);
-          }
+        for (const imgUrl of imagesToSend) {
+          await whatsapp.sendImageMessage(sKey, imgUrl);
+        }
+        if (finalContent) {
+          await whatsapp.sendTextMessage(sKey, finalContent);
         }
         console.log(`[WhatsApp] ✅ Resposta enviada para ${sKey}`);
       }
@@ -594,7 +415,7 @@ setInterval(
       // Define o tempo limite: Considera inativo quem não manda mensagem há 2 horas
       const duasHorasAtras = new Date(Date.now() - 2 * 60 * 60 * 1000);
 
-      // Busca clientes que abandonaram o carrinho ou a conversa no meio
+      // Busca conversas inativas para limpeza de sessão.
       const sessoesInativas = await prisma.chatSession.findMany({
         where: {
           isActive: true,

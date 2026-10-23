@@ -3,6 +3,9 @@ import { ProductService } from './product.service.js';
 import { StorageService } from '../../../shared/services/storage.service.js';
 import { createProductSchema, updateProductSchema } from '../catalog.schemas.js';
 import z from 'zod';
+import { ProductFactsService } from '../productFacts/product-facts.service.js';
+import type { SyncProductLabelInput } from '../productFacts/product-facts.schemas.js';
+import { AppError } from '../../../shared/errors/AppError.js';
 
 type CreateProductBody = z.infer<typeof createProductSchema>;
 type UpdateProductBody = z.infer<typeof updateProductSchema>;
@@ -10,6 +13,7 @@ type UpdateProductBody = z.infer<typeof updateProductSchema>;
 export class ProductController {
   private service = new ProductService();
   private storage = new StorageService();
+  private factsService = new ProductFactsService();
 
   private mapBodyToProductData(body: CreateProductBody | UpdateProductBody) {
     const { stock_qty, category_ids, ...rest } = body;
@@ -47,6 +51,23 @@ export class ProductController {
       console.error(error);
       return reply.status(500).send({ message: 'Erro ao criar produto.' });
     }
+  }
+
+  async detail(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+    const product = await this.service.findOne(request.params.id);
+    if (!product) throw new AppError('Produto não encontrado.', 404);
+    return reply.send(product);
+  }
+
+  async labelFacts(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+    return reply.send(await this.factsService.getByProductId(request.params.id));
+  }
+
+  async syncLabel(
+    request: FastifyRequest<{ Params: { id: string }; Body: SyncProductLabelInput }>,
+    reply: FastifyReply,
+  ) {
+    return reply.send(await this.factsService.sync(request.params.id, request.body));
   }
 
   async update(

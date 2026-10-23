@@ -26,7 +26,7 @@ export class ProductService {
     const pageNum = Number(page) || 1;
     const limitNum = Number(limit) || 2000;
 
-    const cacheKey = `${this.CACHE_PREFIX}page:${pageNum}:limit:${limitNum}:search:${search || 'all'}:cat:${categoryId || 'all'}:active:${isActive || 'all'}`;
+    const cacheKey = `${this.CACHE_PREFIX}page:${pageNum}:limit:${limitNum}:search:${search || 'all'}:cat:${categoryId || 'all'}:active:${isActive ?? 'all'}`;
     const cached = await redis.get(cacheKey);
     if (cached) return JSON.parse(cached);
 
@@ -47,7 +47,10 @@ export class ProductService {
         where,
         skip,
         take: limitNum, // 👈 Usa o limite blindado
-        include: { categories: { select: { id: true, name: true } } },
+        include: {
+          categories: { select: { id: true, name: true } },
+          labelFacts: true,
+        },
         orderBy: { createdAt: 'desc' },
       }),
     ]);
@@ -63,7 +66,16 @@ export class ProductService {
 
   async create(data: any) {
     // 1. Extraímos o category_ids exato que veio do frontend
-    const { category_ids, categoryIds, stock_qty, ...rest } = data;
+    const {
+      category_ids,
+      categoryIds,
+      stock_qty,
+      stock,
+      manufacturer,
+      manufacturerDomain,
+      labelFacts,
+      ...rest
+    } = data;
 
     // Garantia dupla: pega a variável que estiver preenchida
     const catsToConnect = category_ids || categoryIds;
@@ -80,10 +92,15 @@ export class ProductService {
     const product = await prisma.product.create({
       data: {
         ...rest,
-        stock: stock_qty,
+        stock: stock_qty ?? stock,
         categories: catsToConnect
           ? { connect: catsToConnect.map((id: string) => ({ id })) }
           : undefined,
+        ...((manufacturer !== undefined ||
+          manufacturerDomain !== undefined ||
+          labelFacts !== undefined) && {
+          labelFacts: { create: { manufacturer, manufacturerDomain, ...labelFacts } },
+        }),
       },
     });
 
@@ -92,8 +109,27 @@ export class ProductService {
   }
 
   async update(id: string, data: any) {
-    const { category_ids, categoryIds, stock_qty, ...rest } = data;
+    const {
+      category_ids,
+      categoryIds,
+      stock_qty,
+      manufacturer,
+      manufacturerDomain,
+      labelFacts,
+      ...rest
+    } = data;
     const catsToConnect = category_ids || categoryIds;
+    const storedLabel =
+      manufacturer !== undefined || manufacturerDomain !== undefined
+        ? await prisma.productLabel.findUnique({
+            where: { productId: id },
+            select: { manufacturer: true, manufacturerDomain: true },
+          })
+        : null;
+    const sourceIdentityChanged =
+      (manufacturer !== undefined && manufacturer !== storedLabel?.manufacturer) ||
+      (manufacturerDomain !== undefined && manufacturerDomain !== storedLabel?.manufacturerDomain);
+    const invalidateFacts = sourceIdentityChanged || labelFacts !== undefined;
 
     const product = await prisma.product.update({
       where: { id },
@@ -106,11 +142,36 @@ export class ProductService {
         categories: catsToConnect
           ? { set: catsToConnect.map((catId: string) => ({ id: catId })) }
           : undefined,
+        ...((manufacturer !== undefined ||
+          manufacturerDomain !== undefined ||
+          labelFacts !== undefined) && {
+          labelFacts: {
+            upsert: {
+              create: { manufacturer, manufacturerDomain, ...labelFacts },
+              update: {
+                ...(manufacturer !== undefined && { manufacturer }),
+                ...(manufacturerDomain !== undefined && { manufacturerDomain }),
+                ...labelFacts,
+                ...(invalidateFacts && {
+                  status: 'NOT_FOUND',
+                  exactProductMatch: false,
+                  version: { increment: 1 },
+                }),
+              },
+            },
+          },
+        }),
       },
     });
 
     await this.clearCache();
     return product;
+  }
+  async findOne(id: string) {
+    return prisma.product.findFirst({
+      where: { id, deletedAt: null },
+      include: { categories: true, labelFacts: true },
+    });
   }
   async toggleStatus(id: string, isActive: boolean) {
     const product = await prisma.product.update({

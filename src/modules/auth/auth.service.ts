@@ -10,7 +10,7 @@ export class AuthService {
       where: { email },
     });
 
-    if (!user) {
+    if (!user || !user.isActive || user.deletedAt) {
       // Usamos a mesma mensagem genérica para não dar dicas a invasores
       throw new AppError('E-mail ou senha incorretos.', 401);
     }
@@ -22,13 +22,16 @@ export class AuthService {
       throw new AppError('E-mail ou senha incorretos.', 401);
     }
 
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+
     // 3. Remove a senha usando o operador rest que você já aprendeu
     const { password: _, ...userWithoutPassword } = user;
 
     return userWithoutPassword;
   }
-
-
 
   async getUserById(userId: string) {
     const user = await prisma.user.findUnique({

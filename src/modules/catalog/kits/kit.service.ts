@@ -4,6 +4,7 @@ import { redis } from '../../../shared/redis/redis.js';
 interface KitCreateData {
   name: string;
   slug: string;
+  description?: string;
   discountType: 'PERCENTAGE' | 'FIXED';
   discountValue: number;
   productItems: { productId: string; quantity: number }[];
@@ -95,6 +96,7 @@ export class KitService {
       data: {
         name: data.name,
         slug: data.slug,
+        ...(data.description !== undefined && { description: data.description }),
         discountType: data.discountType,
         discountValue: data.discountValue,
         finalPrice: finalPrice,

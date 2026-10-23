@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  editableProductFactsSchema,
+  manufacturerDomainSchema,
+} from './productFacts/product-facts.schemas.js';
 
 // Parametros comuns
 export const idParamSchema = z.object({
@@ -42,6 +46,9 @@ export const createProductSchema = z.object({
   cfop: z.string().optional(),
   category_ids: z.array(z.string().uuid()).default([]),
   isActive: z.boolean().default(true),
+  manufacturer: z.string().trim().min(2).optional(),
+  manufacturerDomain: manufacturerDomainSchema.optional(),
+  labelFacts: editableProductFactsSchema.optional(),
 });
 
 export const updateProductSchema = createProductSchema.partial();

@@ -7,6 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsup src",
     "start": "node dist/server.js",
+    "test": "tsx --test tests/product-facts.test.ts tests/payments.test.ts tests/storefront-consultant-policy.test.ts tests/storefront-consultant-search.test.ts tests/storefront-consultant-facts.test.ts tests/storefront-consultant-research.test.ts tests/whatsapp-supplement-safety.test.ts",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write src/**/*.ts",
     "prepare": "husky",

@@ -45,6 +45,31 @@ enum PaymentStatus {
   REFUNDED
 }
 
+enum CheckoutPaymentMethod {
+  PIX
+  CREDIT_CARD
+  CASH
+}
+
+enum DeliveryMethod {
+  DELIVERY
+  PICKUP
+}
+
+enum PaymentEventStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
+enum PaymentNotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
 enum ChatMessageRole {
   USER
   ASSISTANT
@@ -57,13 +82,23 @@ enum ChatSessionStatus {
   ATENDIMENTO_HUMANO
   FINALIZADO
   CANCELADO
-  
+}
+
+enum StorefrontConsultantMessageRole {
+  USER
+  ASSISTANT
 }
 
 enum ShippingType {
   BY_CEP
   BY_REGION
   BY_WEIGHT
+}
+
+enum ProductLabelStatus {
+  SOURCE_MATCHED
+  NOT_FOUND
+  FAILED
 }
 
 // ============================================================
@@ -113,27 +148,28 @@ model Category {
 }
 
 model Product {
-  id            String    @id @default(uuid())
-  name          String
-  slug          String    @unique
-  description   String?
-  unit          String    @default("UN")
-  price         Decimal   @db.Decimal(10, 2)
-  cost_price    Decimal?  @db.Decimal(10, 2)
-  price_wholesale Decimal? @db.Decimal(10, 2)
-  stock         Int       @default(0)
-  stock_min     Int       @default(0)
-  ncm           String?
-  cfop          String?
-  sku           String?   @unique
-  imageUrl      String?
-  imageKey      String?
-  isActive      Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  deletedAt     DateTime?
+  id              String    @id @default(uuid())
+  name            String
+  slug            String    @unique
+  description     String?
+  unit            String    @default("UN")
+  price           Decimal   @db.Decimal(10, 2)
+  cost_price      Decimal?  @db.Decimal(10, 2)
+  price_wholesale Decimal?  @db.Decimal(10, 2)
+  stock           Int       @default(0)
+  stock_min       Int       @default(0)
+  ncm             String?
+  cfop            String?
+  sku             String?   @unique
+  imageUrl        String?
+  imageKey        String?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
 
   categories Category[]
+  labelFacts ProductLabel?
 
   kitItems   KitItem[]
   orderItems OrderItem[]
@@ -143,6 +179,35 @@ model Product {
   @@index([isActive])
   @@map("products")
 }
+
+model ProductLabel {
+  id                   String             @id @default(uuid())
+  manufacturer         String?
+  manufacturerDomain   String?
+  sourceUrl            String?
+  sourceTitle          String?
+  sourceRetrievedAt    DateTime?
+  sourceHash           String?
+  servingSize          String?
+  servingsPerContainer String?
+  usageInstructions    String?            @db.Text
+  ingredients          String?            @db.Text
+  allergenStatement    String?            @db.Text
+  warnings             Json?
+  nutritionFacts       Json?
+  exactProductMatch    Boolean            @default(false)
+  status               ProductLabelStatus @default(NOT_FOUND)
+  version              Int                @default(1)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  productId String  @unique
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([status, exactProductMatch])
+  @@map("product_labels")
+}
+
 model Kit {
   id            String    @id @default(uuid())
   name          String
@@ -185,28 +250,30 @@ model KitItem {
 // PEDIDOS
 // ============================================================
 model Order {
-  id           String      @id @default(uuid())
-  code         String      @unique // ex: HAV-00001
-  status       OrderStatus @default(PENDING)
-  
+  id     String      @id @default(uuid())
+  code   String      @unique // ex: HAV-00001
+  status OrderStatus @default(PENDING)
+
   // 👉 ADICIONE ESTES CAMPOS (Dados cruciais do cliente)
-  customerName  String
-  customerPhone String
-  customerCpf   String?    // Opcional, útil para PIX/Nota Fiscal
+  customerName    String
+  customerPhone   String
+  customerCpf     String? // Opcional, útil para PIX/Nota Fiscal
   deliveryAddress String?
-  
-  subtotal     Decimal     @db.Decimal(10, 2)
-  shippingCost Decimal     @default(0) @db.Decimal(10, 2)
-  discount     Decimal     @default(0) @db.Decimal(10, 2)
-  total        Decimal     @db.Decimal(10, 2)
+  deliveryMethod  DeliveryMethod?
+  paymentMethod   CheckoutPaymentMethod?
+
+  subtotal     Decimal   @db.Decimal(10, 2)
+  shippingCost Decimal   @default(0) @db.Decimal(10, 2)
+  discount     Decimal   @default(0) @db.Decimal(10, 2)
+  total        Decimal   @db.Decimal(10, 2)
   notes        String?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
   deletedAt    DateTime?
 
   // 👉 Deixe opcional: Representa qual funcionário ajudou neste pedido (se houver)
-  userId       String?
-  user         User?       @relation(fields: [userId], references: [id])
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
 
   shippingRuleId String?
   shippingRule   ShippingRule? @relation(fields: [shippingRuleId], references: [id])
@@ -269,14 +336,20 @@ model Payment {
   pixQrCodeUrl   String? // URL da imagem do QR Code
   paymentLink    String?
   externalId     String?       @unique // ID retornado pelo banco digital
+  providerStatus String?
+  statusDetail   String?
   webhookPayload Json? // payload cru do webhook
   paidAt         DateTime?
   expiresAt      DateTime?
+  lastSyncedAt   DateTime?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
   orderId String @unique
   order   Order  @relation(fields: [orderId], references: [id])
+
+  events        PaymentEvent[]
+  notifications PaymentNotification[]
 
   @@index([status])
   @@index([externalId])
@@ -284,22 +357,62 @@ model Payment {
   @@map("payments")
 }
 
+model PaymentEvent {
+  id                 String             @id @default(uuid())
+  deduplicationKey   String             @unique
+  providerPaymentId  String
+  type               String
+  status             PaymentEventStatus @default(RECEIVED)
+  payload            Json
+  error              String?            @db.Text
+  receivedAt         DateTime            @default(now())
+  processedAt        DateTime?
+
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([providerPaymentId])
+  @@index([status])
+  @@index([receivedAt])
+  @@map("payment_events")
+}
+
+model PaymentNotification {
+  id        String                    @id @default(uuid())
+  type      String
+  channel   String
+  recipient String
+  status    PaymentNotificationStatus @default(PENDING)
+  error     String?                   @db.Text
+  sentAt    DateTime?
+  createdAt DateTime                  @default(now())
+  updatedAt DateTime                  @updatedAt
+
+  paymentId String
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@unique([paymentId, type, channel])
+  @@index([status])
+  @@index([createdAt])
+  @@map("payment_notifications")
+}
+
 // ============================================================
 // CHATBOT
 // ============================================================
 
 model ChatSession {
-  id                 String    @id @default(uuid())
-  sessionKey         String    @unique @default(uuid())
+  id                 String            @id @default(uuid())
+  sessionKey         String            @unique @default(uuid())
   customerName       String?
-  isActive           Boolean   @default(true)
+  isActive           Boolean           @default(true)
   recoveryAttempts   Int               @default(0)
   status             ChatSessionStatus @default(NOVO_ATENDIMENTO)
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
   handoffRequestedAt DateTime?
   userId             String?
-  user               User?     @relation(fields: [userId], references: [id])
+  user               User?             @relation(fields: [userId], references: [id])
 
   messages ChatMessage[]
 
@@ -333,6 +446,39 @@ model ChatbotConfig {
   updatedAt       DateTime @updatedAt
 
   @@map("chatbot_config")
+}
+
+// Public storefront consultant data is intentionally isolated from WhatsApp chat data.
+model StorefrontConsultantSession {
+  id        String   @id @default(uuid())
+  clientId  String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages StorefrontConsultantMessage[]
+
+  @@index([clientId])
+  @@index([expiresAt])
+  @@map("storefront_consultant_sessions")
+}
+
+model StorefrontConsultantMessage {
+  id              String                          @id @default(uuid())
+  role            StorefrontConsultantMessageRole
+  content         String                          @db.Text
+  requestId       String
+  context         Json?
+  recommendations Json?
+  createdAt       DateTime                        @default(now())
+
+  sessionId String
+  session   StorefrontConsultantSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, requestId, role])
+  @@index([sessionId, createdAt])
+  @@map("storefront_consultant_messages")
 }
 
 // ============================================================

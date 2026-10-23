@@ -6,7 +6,11 @@ import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import multipart from '@fastify/multipart';
 
-import { serializerCompiler, validatorCompiler, jsonSchemaTransform } from 'fastify-type-provider-zod';
+import {
+  serializerCompiler,
+  validatorCompiler,
+  jsonSchemaTransform,
+} from 'fastify-type-provider-zod';
 import { errorHandler } from './shared/middlewares/error.middleware.js';
 import { logger } from './shared/logger.js';
 import jwt from '@fastify/jwt';
@@ -21,10 +25,11 @@ import { shippingRoutes } from './modules/shipping/shipping.routes.js';
 import { paymentsRoutes } from './modules/payments/payments.routes.js';
 import { redis } from './shared/redis/redis.js';
 import { orderRoutes } from './modules/orders/orders.routes.js';
+import { storefrontRoutes } from './modules/storefront/storefront.routes.js';
+import { storefrontConsultantRoutes } from './modules/storefrontConsultant/storefrontConsultant.routes.js';
 
 export const app = fastify({
-  loggerInstance: logger, 
-  
+  loggerInstance: logger,
 });
 
 app.setValidatorCompiler(validatorCompiler);
@@ -33,17 +38,17 @@ app.setSerializerCompiler(serializerCompiler);
 app.setErrorHandler(errorHandler);
 
 app.register(fastifyRateLimit, {
-    max: 100, // Limite global padrão: 100 requisições
-    timeWindow: '1 minute', // a cada 1 minuto por IP
-    redis: redis, // Salva a contagem no seu Redis!
-    errorResponseBuilder: function (request, context) {
-      return {
-        statusCode: 429,
-        error: 'Too Many Requests',
-        message: `Calma lá! Você atingiu o limite de requisições. Tente novamente em ${context.after}.`
-      }
-    }
-  });
+  max: 100, // Limite global padrão: 100 requisições
+  timeWindow: '1 minute', // a cada 1 minuto por IP
+  redis: redis, // Salva a contagem no seu Redis!
+  errorResponseBuilder: function (request, context) {
+    return {
+      statusCode: 429,
+      error: 'Too Many Requests',
+      message: `Calma lá! Você atingiu o limite de requisições. Tente novamente em ${context.after}.`,
+    };
+  },
+});
 
 // Segurança base
 app.register(helmet);
@@ -51,7 +56,7 @@ app.register(cors, {
   origin: '*',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'], // 👈 O PATCH e OPTIONS precisam estar aqui!
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Consultant-Token'],
 });
 app.register(jwt, {
   secret: env.JWT_SECRET,
@@ -92,11 +97,11 @@ app.register(multipart);
 
 // Rota de Healthcheck
 app.get('/health', async (request, reply) => {
-  return reply.status(200).send({ 
-    status: 'ok', 
+  return reply.status(200).send({
+    status: 'ok',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(), // Quanto tempo o servidor está no ar
-    memoryUsage: process.memoryUsage() // Para monitorar vazamento de memória
+    memoryUsage: process.memoryUsage(), // Para monitorar vazamento de memória
   });
 });
 
@@ -105,7 +110,9 @@ app.register(authRoutes, { prefix: '/auth' });
 app.register(dashboardRoutes, { prefix: '/dashboard' });
 app.register(catalogRoutes, { prefix: '/catalog' });
 app.register(whatsappWebhookRoutes, { prefix: '/webhook/whatsapp' });
-app.register(chatbotRoutes, { prefix: '/chatbot' })
+app.register(chatbotRoutes, { prefix: '/chatbot' });
 app.register(shippingRoutes, { prefix: '/shipping' });
 app.register(paymentsRoutes, { prefix: '/payments' });
 app.register(orderRoutes, { prefix: '/orders' });
+app.register(storefrontRoutes, { prefix: '/storefront' });
+app.register(storefrontConsultantRoutes, { prefix: '/storefront/consultant' });

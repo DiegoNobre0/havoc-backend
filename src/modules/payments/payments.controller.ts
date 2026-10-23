@@ -2,6 +2,9 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { PaymentsService } from './payments.service.js';
 import { CreatePixBody, CreateLinkBody } from './payments.schemas.js';
 import { paymentQueue } from '../../shared/worker/payment.queue.js';
+import { normalizeMercadoPagoWebhook } from './payments.utils.js';
+
+type WebhookPayload = Record<string, any>;
 
 export class PaymentsController {
   private service = new PaymentsService();
@@ -25,34 +28,20 @@ export class PaymentsController {
 
   // ─── ROTA ABERTA PARA O MERCADO PAGO BATER ───
   async webhook(request: FastifyRequest, reply: FastifyReply) {
-    const body: any = request.body;
-    const headers = request.headers; // 👉 CAPTURA OS HEADERS AQUI
-
-    // O MP pode enviar a notificação usando "action" ou "type" ou "topic"
-    const actionType = body?.action || body?.type || body?.topic;
-
-    if (
-      actionType === 'payment.created' ||
-      actionType === 'payment.updated' ||
-      actionType === 'payment'
-    ) {
-      const paymentId = body?.data?.id || body?.resource;
-
-      if (paymentId) {
-        // 🔥 Joga o BODY e os HEADERS para o BullMQ processar assincronamente 🔥
-        await paymentQueue.add(
-          'process-mp-webhook',
-          {
-            body,
-            headers, // 👉 Repassando a chave de segurança para o worker
-          },
-          {
-            removeOnComplete: true,
-            attempts: 3, // Se falhar, tenta de novo 3 vezes
-            backoff: { type: 'exponential', delay: 2000 },
-          },
-        );
-      }
+    const body = normalizeMercadoPagoWebhook(
+      request.body as WebhookPayload | null | undefined,
+      request.query as Record<string, unknown>,
+    );
+    if (body) {
+      await paymentQueue.add(
+        'process-mp-webhook',
+        { body, headers: request.headers },
+        {
+          removeOnComplete: true,
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 2000 },
+        },
+      );
     }
 
     // Devolve 200 imediatamente para o MP não bloquear nossa API
