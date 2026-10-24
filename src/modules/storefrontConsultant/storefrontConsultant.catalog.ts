@@ -1,6 +1,7 @@
 import { prisma } from '../../database/prisma.js';
 import type { ConsultantContext } from './storefrontConsultant.schemas.js';
 import {
+  isKitCatalogRequest,
   isReferentialRequest,
   searchCatalog,
   type CatalogSearchDocument,
@@ -53,7 +54,11 @@ export async function findConsultantCandidates(
   content: string,
   context: ConsultantContext,
   recentRecommendationKeys: readonly string[] = [],
-  semantic?: { categorySlugs: readonly string[]; catalogTerms: readonly string[] },
+  semantic?: {
+    categorySlugs: readonly string[];
+    catalogTerms: readonly string[];
+    itemTypes: readonly ('product' | 'kit')[];
+  },
 ): Promise<ConsultantCandidate[]> {
   if (!content.trim()) return [];
 
@@ -250,9 +255,15 @@ export async function findConsultantCandidates(
             ({ product, quantity }) =>
               product.isActive && product.deletedAt === null && product.stock >= quantity,
           ),
-        categories: kit.items.flatMap(({ product }) =>
-          product.categories.flatMap((category) => [category.name, category.slug]),
-        ),
+        categories: [
+          'kit',
+          'combo',
+          'promoção',
+          'promocional',
+          ...kit.items.flatMap(({ product }) =>
+            product.categories.flatMap((category) => [category.name, category.slug]),
+          ),
+        ],
         itemNames: kit.items.flatMap(({ product }) => [product.name, product.slug]),
       },
       candidate: {
@@ -280,10 +291,23 @@ export async function findConsultantCandidates(
     })),
   ];
 
-  const byKey = new Map(indexed.map((entry) => [`${entry.search.type}:${entry.search.id}`, entry]));
+  const requestedTypes = new Set(
+    semantic?.itemTypes.length
+      ? semantic.itemTypes
+      : isKitCatalogRequest(content)
+        ? (['kit'] as const)
+        : [],
+  );
+  const searchable =
+    requestedTypes.size > 0
+      ? indexed.filter((entry) => requestedTypes.has(entry.search.type))
+      : indexed;
+  const byKey = new Map(
+    searchable.map((entry) => [`${entry.search.type}:${entry.search.id}`, entry]),
+  );
   const matched = searchCatalog(
     content,
-    indexed.map(({ search }) => search),
+    searchable.map(({ search }) => search),
     context.item,
   ).map(({ document }) => byKey.get(`${document.type}:${document.id}`)!.candidate);
 
@@ -294,7 +318,7 @@ export async function findConsultantCandidates(
       const text = `${entry.candidate.name} ${entry.candidate.description}`.toLowerCase();
       return terms.filter((term) => text.includes(term)).length;
     };
-    const semanticMatches = indexed
+    const semanticMatches = searchable
       .filter(
         ({ search }) =>
           selectedCategories.size === 0 ||
@@ -311,7 +335,13 @@ export async function findConsultantCandidates(
     if (semanticMatches.length > 0) return semanticMatches;
   }
 
-  if (!isReferentialRequest(content) || recentRecommendationKeys.length === 0) return matched;
+  if (!isReferentialRequest(content) || recentRecommendationKeys.length === 0) {
+    if (matched.length > 0 || !requestedTypes.has('kit')) return matched;
+    return searchable
+      .map(({ candidate }) => candidate)
+      .sort((left, right) => Number(right.available) - Number(left.available))
+      .slice(0, 12);
+  }
 
   const matchedByKey = new Map(
     matched.map((candidate) => [`${candidate.type}:${candidate.id}`, candidate]),

@@ -68,6 +68,7 @@ export class ChatbotContext {
     let candidates = await findConsultantCandidates(pergunta, { surface: 'catalog' }, [], {
       categorySlugs: plan.categorySlugs,
       catalogTerms: plan.catalogTerms,
+      itemTypes: plan.catalogItemTypes,
     });
     const profiles = new Map<string, Awaited<ReturnType<typeof researchExactProductProfile>>>();
     if (plan.requiresComposition) {

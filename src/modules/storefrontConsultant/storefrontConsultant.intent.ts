@@ -8,6 +8,14 @@ export type ConsultantCategory = { name: string; slug: string };
 
 const consultantIntentSchema = z.object({
   isRecommendationRequest: z.boolean(),
+  requestKind: z.enum([
+    'informational',
+    'catalog_search',
+    'recommendation',
+    'availability',
+    'price',
+  ]),
+  catalogItemTypes: z.array(z.enum(['product', 'kit'])).max(2),
   goal: z.string().trim().min(1).max(120).nullable(),
   categorySlugs: z.array(z.string().trim().min(1)).max(4),
   catalogTerms: z.array(z.string().trim().min(1).max(60)).max(8),
@@ -28,7 +36,10 @@ export function hasExplicitCommercialIntent(content: string) {
   const text = normalizeSearchText(content);
   if (
     /\b(?:comprar|compra|preco|precos|quanto custa)\b/.test(text) ||
-    /\b(?:tem|ha)\b.{0,40}\bdisponive(?:l|is)\b/.test(text)
+    /\b(?:tem|ha)\b.{0,40}\bdisponive(?:l|is)\b/.test(text) ||
+    /\b(?:tem|ha)\b.{0,80}\b(?:combo|combos|kit|kits|promocao|promocoes|produto|produtos|suplemento|suplementos)\b/.test(
+      text,
+    )
   ) {
     return true;
   }
@@ -48,10 +59,12 @@ export function hasExplicitCommercialIntent(content: string) {
 
 export function allowsConsultantRecommendations(
   content: string,
+  semanticCommercialIntent: boolean,
   plannedRecommendation: boolean,
   hasActiveHealthScreen: boolean,
 ) {
   if (hasExplicitCommercialIntent(content)) return true;
+  if (semanticCommercialIntent) return true;
   const text = normalizeSearchText(content);
   const answersHealthScreen =
     !/\b(?:como|qual|quais|quando|onde|por que|o que)\b/.test(text) &&
@@ -78,7 +91,7 @@ export async function planConsultantIntent(
         {
           role: 'system',
           content:
-            'Você classifica pedidos para um catálogo real de suplementos. Entenda a intenção e o objetivo em linguagem natural; não exija que o cliente cite o nome de uma categoria. Escolha somente categorySlugs fornecidos. Se nenhuma categoria representar o objetivo, retorne categorySlugs vazio e use catalogTerms para localizar produtos; nunca associe sono/relaxamento a Energia ou Pré-Treino. Use o histórico para continuar uma triagem iniciada antes. Pedidos de recomendação para emagrecimento, termogênicos, energia, pré-treino, sono ou relaxamento exigem triagem. Nesses casos use needs_screening até o cliente negar explicitamente condições de saúde, pressão alta, problema cardíaco, diabetes, ansiedade relevante, doença renal/hepática, gestação/amamentação, menor idade e uso de medicamentos. Use risk quando ele confirmar qualquer um desses fatores, e clear somente após negativa explícita. not_required vale para perguntas que não exigem essa triagem. avoidsStimulants deve refletir preferência explícita sobre cafeína/estimulantes. catalogTerms são termos curtos úteis para localizar no nome ou descrição os produtos mais relacionados ao objetivo. Toda recomendação baseada em objetivo, ingrediente, cafeína, lactose, alérgeno ou vitamina exige requiresComposition=true. Não invente categorias.',
+            'Você classifica mensagens para um catálogo real de suplementos. Ignore erros ortográficos, interjeições, gírias, palavrões e palavras de preenchimento; extraia a intenção útil sem repetir esses termos. requestKind=informational para perguntas sobre funcionamento, composição, uso, efeitos ou diferenças; catalog_search para quem procura itens; recommendation para pedidos de indicação; availability para perguntas se a loja tem algo; price para preço. isRecommendationRequest=true para qualquer intenção comercial de buscar, indicar, verificar disponibilidade ou preço, e false para informação. Combo, pacote, conjunto, cesta promocional e promoção de produtos significam catalogItemTypes=[kit]. Um suplemento individual significa product; use ambos somente quando realmente pedido. Entenda o objetivo em linguagem natural; não exija que o cliente cite o nome de uma categoria. Escolha somente categorySlugs fornecidos. Se nenhuma categoria representar o objetivo, retorne categorySlugs vazio e use catalogTerms limpos, sem gírias ou palavrões, para localizar itens; nunca associe sono/relaxamento a Energia ou Pré-Treino. Use o histórico para continuar uma triagem iniciada antes. Pedidos de recomendação para emagrecimento, termogênicos, energia, pré-treino, sono ou relaxamento exigem triagem. Nesses casos use needs_screening até o cliente negar explicitamente condições de saúde, pressão alta, problema cardíaco, diabetes, ansiedade relevante, doença renal/hepática, gestação/amamentação, menor idade e uso de medicamentos. Use risk quando ele confirmar qualquer um desses fatores, e clear somente após negativa explícita. not_required vale para perguntas que não exigem essa triagem. avoidsStimulants deve refletir preferência explícita sobre cafeína/estimulantes. Toda recomendação baseada em objetivo, ingrediente, cafeína, lactose, alérgeno ou vitamina exige requiresComposition=true. Não invente categorias.',
         },
         {
           role: 'user',

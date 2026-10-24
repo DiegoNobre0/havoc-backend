@@ -101,6 +101,24 @@ const STOPWORDS = new Set([
 const ALIAS_GROUPS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['creatina', ['creatina', 'creatine']],
   ['proteina', ['proteina', 'protein', 'whey', '3way', '3 whey', 'three whey']],
+  [
+    'kit',
+    [
+      'kit',
+      'kits',
+      'combo',
+      'combos',
+      'pacote',
+      'pacotes',
+      'conjunto',
+      'conjuntos',
+      'cesta',
+      'cestas',
+      'promocao',
+      'promocoes',
+      'promocional',
+    ],
+  ],
   ['pre treino', ['pre treino', 'pre workout']],
   ['hipercalorico', ['hipercalorico', 'mass gainer']],
   ['termogenico', ['termogenico', 'thermogenic']],
@@ -160,6 +178,12 @@ export function tokenizeSearchText(value: string) {
 export function isReferentialRequest(value: string) {
   const normalized = normalizeSearchText(value);
   return REFERENTIAL_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+export function isKitCatalogRequest(value: string) {
+  return /\b(?:kit|kits|combo|combos|pacote|pacotes|conjunto|conjuntos|cesta|cestas|promocao|promocoes|promocional)\b/.test(
+    normalizeSearchText(value),
+  );
 }
 
 export function damerauLevenshteinDistance(left: string, right: string) {

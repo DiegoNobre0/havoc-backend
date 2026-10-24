@@ -94,15 +94,31 @@ test('builds a bounded transcription prompt with recent conversation context', (
 test('allows cards only for explicit shopping requests or valid screening answers', () => {
   assert.equal(hasExplicitCommercialIntent('Quero whey sem lactose'), true);
   assert.equal(hasExplicitCommercialIntent('Me mostre opções de whey'), true);
+  assert.equal(hasExplicitCommercialIntent('Tem algum combo promocional?'), true);
+  assert.equal(
+    hasExplicitCommercialIntent('Se eu perguntar se tem uma emrda de combo promocional?'),
+    true,
+  );
+  assert.equal(hasExplicitCommercialIntent('Há alguma promoção?'), true);
   assert.equal(hasExplicitCommercialIntent('Quanto custa a creatina?'), true);
   assert.equal(hasExplicitCommercialIntent('Quero saber quanto custa a creatina'), true);
   assert.equal(hasExplicitCommercialIntent('Quero saber como funciona o 3 whey'), false);
   assert.equal(hasExplicitCommercialIntent('Quero uma informação sobre whey'), false);
   assert.equal(hasExplicitCommercialIntent('Qual é o valor nutricional desse whey?'), false);
   assert.equal(hasExplicitCommercialIntent('Whey isolado não tem lactose?'), false);
-  assert.equal(allowsConsultantRecommendations('Não tenho doenças e não uso remédios', true, true), true);
-  assert.equal(allowsConsultantRecommendations('Como funciona a cafeína?', true, true), false);
-  assert.equal(allowsConsultantRecommendations('Não tenho doenças', true, false), false);
+  assert.equal(
+    allowsConsultantRecommendations('Não tenho doenças e não uso remédios', false, true, true),
+    true,
+  );
+  assert.equal(
+    allowsConsultantRecommendations('Como funciona a cafeína?', false, true, true),
+    false,
+  );
+  assert.equal(allowsConsultantRecommendations('Não tenho doenças', false, true, false), false);
+  assert.equal(
+    allowsConsultantRecommendations('Cadê a porcaria das ofertas em pacote?', true, true, false),
+    true,
+  );
 });
 
 test('rejects empty and oversized consultant transcripts safely', () => {

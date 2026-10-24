@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   correctSearchTokens,
   damerauLevenshteinDistance,
+  isKitCatalogRequest,
   isReferentialRequest,
   normalizeSearchText,
   searchCatalog,
@@ -63,6 +64,43 @@ test('maps Portuguese and English catalog aliases to the same search token', () 
     'proteina',
     'proteina',
   ]);
+  assert.deepEqual(tokenizeSearchText('combo promoção promocional pacote conjunto cesta'), [
+    'kit',
+    'kit',
+    'kit',
+    'kit',
+    'kit',
+    'kit',
+  ]);
+});
+
+test('recognizes kit requests despite unrelated or offensive filler words', () => {
+  assert.equal(isKitCatalogRequest('Tem uma emrda de combo promocional?'), true);
+  assert.equal(isKitCatalogRequest('Cadê a desgraça do pacote de whey?'), true);
+  assert.equal(isKitCatalogRequest('Vocês vendem algum conjunto?'), true);
+  assert.equal(isKitCatalogRequest('Como funciona whey isolado?'), false);
+});
+
+test('finds promotional combos as kits without returning individual products', () => {
+  const promotionalDocuments: CatalogSearchDocument[] = [
+    ...documents,
+    {
+      type: 'kit',
+      id: 'kit-id',
+      slug: 'kit-whey-creatina',
+      name: 'Kit Whey + Creatina',
+      available: true,
+      categories: ['kit', 'combo', 'promoção', 'promocional'],
+      itemNames: ['Whey Protein', 'Creatina'],
+    },
+  ];
+
+  assert.deepEqual(
+    searchCatalog('tem algum combo promocional', promotionalDocuments).map(
+      ({ document }) => document.id,
+    ),
+    ['kit-id'],
+  );
 });
 
 test('corrects eligible typos with Damerau-Levenshtein distance but not short tokens', () => {

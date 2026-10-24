@@ -35,6 +35,7 @@ import {
 } from './storefrontConsultant.research.js';
 import type { ConsultantContext, CreateConsultantMessage } from './storefrontConsultant.schemas.js';
 import { buildConsultantTranscriptionPrompt } from './storefrontConsultant.audio.js';
+import { isKitCatalogRequest } from './storefrontConsultant.search.js';
 
 const SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000;
 
@@ -154,8 +155,11 @@ export class StorefrontConsultantService {
         .reverse()
         .find((message) => message.role === 'ASSISTANT');
       const hasActiveHealthScreen = latestAssistant?.content === HEALTH_SCREEN_QUESTION;
+      const semanticCommercialIntent =
+        intent?.isRecommendationRequest === true && intent.requestKind !== 'informational';
       const allowsRecommendations = allowsConsultantRecommendations(
         userMessage.content,
+        semanticCommercialIntent,
         intent?.isRecommendationRequest === true,
         hasActiveHealthScreen,
       );
@@ -184,7 +188,11 @@ export class StorefrontConsultantService {
         context,
         recentRecommendationKeys,
         allowsRecommendations && intent?.isRecommendationRequest
-          ? { categorySlugs: intent.categorySlugs, catalogTerms: intent.catalogTerms }
+          ? {
+              categorySlugs: intent.categorySlugs,
+              catalogTerms: intent.catalogTerms,
+              itemTypes: intent.catalogItemTypes,
+            }
           : undefined,
       );
       let resolvedFactIntents = factIntents;
@@ -289,7 +297,20 @@ export class StorefrontConsultantService {
             });
           }
         }
-        if (intent?.avoidsStimulants === true && recommendationCandidates.length === 0) {
+        const requestsKits =
+          intent?.catalogItemTypes.includes('kit') === true ||
+          isKitCatalogRequest(userMessage.content);
+        if (
+          requestsKits &&
+          !recommendationCandidates.some(
+            (candidate) => candidate.type === 'kit' && candidate.available,
+          )
+        ) {
+          answer = {
+            content: 'Não temos combos disponíveis no momento.',
+            recommendations: [],
+          };
+        } else if (intent?.avoidsStimulants === true && recommendationCandidates.length === 0) {
           answer = {
             content:
               'Não encontrei no catálogo uma opção relacionada ao seu objetivo cuja ausência de cafeína ou outros estimulantes eu consiga confirmar. Prefiro não indicar um produto sem essa confirmação.',
