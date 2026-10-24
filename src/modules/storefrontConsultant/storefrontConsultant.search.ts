@@ -100,7 +100,7 @@ const STOPWORDS = new Set([
 
 const ALIAS_GROUPS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['creatina', ['creatina', 'creatine']],
-  ['proteina', ['proteina', 'protein', 'whey']],
+  ['proteina', ['proteina', 'protein', 'whey', '3way', '3 whey', 'three whey']],
   ['pre treino', ['pre treino', 'pre workout']],
   ['hipercalorico', ['hipercalorico', 'mass gainer']],
   ['termogenico', ['termogenico', 'thermogenic']],

@@ -114,7 +114,7 @@ export function shouldResearchGeneralQuestion(content: string) {
     /\bestudos?\b/,
     /\bqual a diferenca\b/,
     /\bdiferenca entre\b/,
-    /\bcomo funciona\b/,
+    /\bcomo (?:e que )?funciona\b/,
     /\befeitos?\b/,
     /\bfaz mal\b/,
     /\be seguro\b/,
@@ -125,7 +125,15 @@ export function shouldResearchGeneralQuestion(content: string) {
     /\briscos?\b/,
     /\bpode misturar\b/,
     /\bvale a pena\b/,
+    /\b(?:tem|contem|possui|sem|nao tem) (?:lactose|gluten|cafeina)\b/,
   ].some((pattern) => pattern.test(text));
+}
+
+export function normalizeGeneralResearchQuery(content: string) {
+  return content.replace(
+    /\b(?:3\s*way|three\s+way|3\s+whey|three\s+whey)\b/gi,
+    'whey protein blend (3 whey), tipos concentrado, isolado e hidrolisado',
+  );
 }
 
 export function trustedResearchDomain(hostname: string) {
@@ -223,6 +231,7 @@ export async function researchGeneralQuestion(
   if (!openaiKey || !process.env.SERPER_API_KEY?.trim()) return null;
   const includeSources = options.includeSources ?? wantsResearchSources(query);
   const key = cacheKey(query);
+  const researchQuery = normalizeGeneralResearchQuery(query);
   try {
     const { redis } = await import('../../shared/redis/redis.js');
     const cached = await redis.get(key);
@@ -235,7 +244,7 @@ export async function researchGeneralQuestion(
   }
 
   try {
-    const sources = await searchTrustedSources(query);
+    const sources = await searchTrustedSources(researchQuery);
     if (sources.length === 0) return null;
     const openai = new OpenAI({ apiKey: openaiKey });
     const completion = await openai.chat.completions.parse({

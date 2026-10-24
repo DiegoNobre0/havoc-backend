@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
 import { logger } from '../../shared/logger.js';
+import { normalizeSearchText } from './storefrontConsultant.search.js';
 
 export type ConsultantCategory = { name: string; slug: string };
 
@@ -22,6 +23,43 @@ export const HEALTH_SCREEN_QUESTION =
 
 export const HEALTH_RISK_RESPONSE =
   'Como você informou uma condição de saúde, uso de medicamento, gestação, amamentação ou menor idade, não posso escolher um suplemento com segurança. Consulte um médico ou nutricionista antes de utilizar qualquer produto.';
+
+export function hasExplicitCommercialIntent(content: string) {
+  const text = normalizeSearchText(content);
+  if (
+    /\b(?:comprar|compra|preco|precos|quanto custa)\b/.test(text) ||
+    /\b(?:tem|ha)\b.{0,40}\bdisponive(?:l|is)\b/.test(text)
+  ) {
+    return true;
+  }
+  if (
+    /\b(?:quero|queria|gostaria de) (?:saber|entender|conhecer|tirar uma duvida|uma informacao|informacoes|uma explicacao)\b/.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+  return [
+    /\b(?:me )?(?:indique|indicar|recomende|recomendar|sugira|sugerir|mostre|mostrar|liste|listar)\b/,
+    /\b(?:quero|preciso|procuro|busco) (?!saber\b|entender\b|conhecer\b|informacao\b|informacoes\b|uma informacao\b|uma explicacao\b|uma orientacao\b)/,
+    /\bqual\b.{0,30}\b(?:voce |voces )?(?:indica|recomenda)\b/,
+  ].some((pattern) => pattern.test(text));
+}
+
+export function allowsConsultantRecommendations(
+  content: string,
+  plannedRecommendation: boolean,
+  hasActiveHealthScreen: boolean,
+) {
+  if (hasExplicitCommercialIntent(content)) return true;
+  const text = normalizeSearchText(content);
+  const answersHealthScreen =
+    !/\b(?:como|qual|quais|quando|onde|por que|o que)\b/.test(text) &&
+    /\b(?:nao|nenhum|nenhuma|tenho|uso|tomo|sou|estou|medicamento|remedio|gestante|gravida|amament|menor|pressao|cardiac|diabetes|ansiedade|renal|hepat|cafeina|estimulante)\b/.test(
+      text,
+    );
+  return plannedRecommendation && hasActiveHealthScreen && answersHealthScreen;
+}
 
 export async function planConsultantIntent(
   currentMessage: string,

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   conciseCommonUsageAnswer,
+  normalizeGeneralResearchQuery,
   shouldResearchGeneralQuestion,
   trustedResearchDomain,
   trustedRetailDomain,
@@ -13,7 +14,15 @@ test('classifies evidence questions without treating shopping requests as resear
   assert.equal(shouldResearchGeneralQuestion('Qual a diferença entre whey isolado e concentrado?'), true);
   assert.equal(shouldResearchGeneralQuestion('Creatina faz mal?'), true);
   assert.equal(shouldResearchGeneralQuestion('Qual é o melhor horário para tomar creatina?'), true);
+  assert.equal(shouldResearchGeneralQuestion('E o 3way, como é que funciona?'), true);
+  assert.equal(shouldResearchGeneralQuestion('Whey isolado não tem lactose?'), true);
+  assert.equal(shouldResearchGeneralQuestion('Esse pré-treino tem cafeína?'), true);
   assert.equal(shouldResearchGeneralQuestion('Preciso de uma creatina'), false);
+});
+
+test('expands 3 whey research without changing ordinary questions', () => {
+  assert.match(normalizeGeneralResearchQuery('Como funciona o 3 whey?'), /tipos concentrado, isolado e hidrolisado/);
+  assert.equal(normalizeGeneralResearchQuery('Como funciona a creatina?'), 'Como funciona a creatina?');
 });
 
 test('accepts only explicitly trusted retail domains for product-label fallback', () => {

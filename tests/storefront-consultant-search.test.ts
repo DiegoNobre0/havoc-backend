@@ -58,6 +58,11 @@ test('maps Portuguese and English catalog aliases to the same search token', () 
     'glutamina',
     'proteina',
   ]);
+  assert.deepEqual(tokenizeSearchText('3way 3 whey three whey'), [
+    'proteina',
+    'proteina',
+    'proteina',
+  ]);
 });
 
 test('corrects eligible typos with Damerau-Levenshtein distance but not short tokens', () => {

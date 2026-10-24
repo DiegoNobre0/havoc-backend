@@ -10,6 +10,8 @@ import {
   type ConsultantCandidate,
 } from './storefrontConsultant.catalog.js';
 import {
+  allowsConsultantRecommendations,
+  hasExplicitCommercialIntent,
   HEALTH_RISK_RESPONSE,
   HEALTH_SCREEN_QUESTION,
   planConsultantIntent,
@@ -32,6 +34,7 @@ import {
   wantsResearchSources,
 } from './storefrontConsultant.research.js';
 import type { ConsultantContext, CreateConsultantMessage } from './storefrontConsultant.schemas.js';
+import { buildConsultantTranscriptionPrompt } from './storefrontConsultant.audio.js';
 
 const SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000;
 
@@ -132,22 +135,37 @@ export class StorefrontConsultantService {
       .map((message) => message.content);
     const safety = evaluateConsultantSafety(userMessage.content);
     let answer: { content: string; recommendations: StoredRecommendation[] };
+    let recommendationsAllowed = false;
 
     if (safety.blocked) {
       answer = { content: safety.content, recommendations: [] };
     } else {
       const factIntents = detectFactIntents(userMessage.content);
-      const categories = factIntents.length === 0 ? await listConsultantCategories() : [];
+      const explicitCommercialIntent = hasExplicitCommercialIntent(userMessage.content);
+      const categories =
+        factIntents.length === 0 || explicitCommercialIntent
+          ? await listConsultantCategories()
+          : [];
       const intent =
-        factIntents.length === 0
+        categories.length > 0
           ? await planConsultantIntent(userMessage.content, previousUserMessages, categories)
           : null;
-      if (intent?.isRecommendationRequest && intent.healthScreen === 'needs_screening') {
+      const latestAssistant = [...history]
+        .reverse()
+        .find((message) => message.role === 'ASSISTANT');
+      const hasActiveHealthScreen = latestAssistant?.content === HEALTH_SCREEN_QUESTION;
+      const allowsRecommendations = allowsConsultantRecommendations(
+        userMessage.content,
+        intent?.isRecommendationRequest === true,
+        hasActiveHealthScreen,
+      );
+      recommendationsAllowed = allowsRecommendations;
+      if (allowsRecommendations && intent?.healthScreen === 'needs_screening') {
         answer = { content: HEALTH_SCREEN_QUESTION, recommendations: [] };
         const assistant = await this.persistAssistant(sessionId, input.requestId, answer);
         return { message: mapMessage(assistant) };
       }
-      if (intent?.isRecommendationRequest && intent.healthScreen === 'risk') {
+      if (allowsRecommendations && intent?.healthScreen === 'risk') {
         answer = { content: HEALTH_RISK_RESPONSE, recommendations: [] };
         const assistant = await this.persistAssistant(sessionId, input.requestId, answer);
         return { message: mapMessage(assistant) };
@@ -165,7 +183,7 @@ export class StorefrontConsultantService {
         userMessage.content,
         context,
         recentRecommendationKeys,
-        intent?.isRecommendationRequest
+        allowsRecommendations && intent?.isRecommendationRequest
           ? { categorySlugs: intent.categorySlugs, catalogTerms: intent.catalogTerms }
           : undefined,
       );
@@ -174,7 +192,7 @@ export class StorefrontConsultantService {
         const previousUser = [...history].reverse().find((message) => message.role === 'USER');
         if (previousUser) resolvedFactIntents = detectFactIntents(previousUser.content);
       }
-      if (resolvedFactIntents.length > 0) {
+      if (resolvedFactIntents.length > 0 && !allowsRecommendations) {
         let product = resolveSingleProductCandidate(userMessage.content, candidates);
         if (product) {
           let syncFailure: { content: string; recommendations: StoredRecommendation[] } | null =
@@ -211,9 +229,10 @@ export class StorefrontConsultantService {
             resolvedFactIntents.length === 1 &&
             resolvedFactIntents[0] === 'usage' &&
             isGenericUsageQuestion(userMessage.content);
-          const researched = generalUsage
-            ? await researchGeneralQuestion(userMessage.content)
-            : null;
+          const researched =
+            generalUsage || shouldResearchGeneralQuestion(userMessage.content)
+              ? await researchGeneralQuestion(userMessage.content)
+              : null;
           if (researched) {
             answer = { content: researched, recommendations: [] };
           } else {
@@ -223,16 +242,13 @@ export class StorefrontConsultantService {
             answer = {
               content:
                 products.length > 0
-                  ? [
-                      'Você quer saber sobre o uso geral do suplemento ou sobre um produto específico? O modo de uso e a porção podem variar conforme o rótulo.',
-                      'Se for um produto, escolha uma opção abaixo ou responda com 1, 2 ou 3.',
-                    ].join('\n')
-                  : 'Você quer uma orientação geral ou consultar o modo de uso de um produto específico? Se for um produto, informe o nome exato para eu conferir o rótulo oficial.',
-              recommendations: products,
+                  ? 'Essa informação pode variar entre fórmulas e fabricantes. Informe o nome completo do produto para eu conferir o rótulo exato, ou peça uma explicação geral sobre esse tipo de suplemento.'
+                  : 'Informe o nome completo do produto para eu conferir o rótulo exato, ou peça uma explicação geral sobre esse tipo de suplemento.',
+              recommendations: [],
             };
           }
         }
-      } else if (shouldResearchGeneralQuestion(userMessage.content)) {
+      } else if (!allowsRecommendations && shouldResearchGeneralQuestion(userMessage.content)) {
         const researched = await researchGeneralQuestion(userMessage.content);
         if (researched) {
           answer = { content: researched, recommendations: [] };
@@ -243,7 +259,7 @@ export class StorefrontConsultantService {
             recommendations: [],
           };
         }
-      } else {
+      } else if (allowsRecommendations) {
         let recommendationCandidates = candidates;
         const researchedProfiles = new Map<string, ResearchedProductProfile>();
         if (intent?.isRecommendationRequest && intent.requiresComposition) {
@@ -294,7 +310,17 @@ export class StorefrontConsultantService {
               .slice(0, 3),
           };
         }
+      } else {
+        answer = {
+          content:
+            'Posso explicar composição, uso, diferenças e efeitos gerais de suplementos. Se você estiver procurando um produto, diga que deseja uma indicação, opções, disponibilidade ou preço.',
+          recommendations: [],
+        };
       }
+    }
+
+    if (!recommendationsAllowed && answer.recommendations.length > 0) {
+      answer = { ...answer, recommendations: [] };
     }
 
     const assistant = await this.persistAssistant(sessionId, input.requestId, answer);
@@ -314,6 +340,17 @@ export class StorefrontConsultantService {
 
     if (!user || !assistant) return null;
     return { transcript: user.content, message: mapMessage(assistant) };
+  }
+
+  async getTranscriptionPrompt(sessionId: string, token: string) {
+    await this.authenticate(sessionId, token);
+    const history = await prisma.storefrontConsultantMessage.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: 'desc' },
+      take: 6,
+      select: { content: true },
+    });
+    return buildConsultantTranscriptionPrompt(history.reverse().map((message) => message.content));
   }
 
   async sendTranscribedMessage(sessionId: string, token: string, input: CreateConsultantMessage) {

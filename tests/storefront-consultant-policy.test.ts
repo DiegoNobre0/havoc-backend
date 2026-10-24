@@ -2,9 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { evaluateConsultantSafety } from '../src/modules/storefrontConsultant/storefrontConsultant.policy.js';
 import {
+  buildConsultantTranscriptionPrompt,
   consultantAudioExtension,
+  normalizeConsultantTranscript,
   validateConsultantTranscript,
 } from '../src/modules/storefrontConsultant/storefrontConsultant.audio.js';
+import {
+  allowsConsultantRecommendations,
+  hasExplicitCommercialIntent,
+} from '../src/modules/storefrontConsultant/storefrontConsultant.intent.js';
 import { AppError } from '../src/shared/errors/AppError.js';
 
 test('allows general supplement questions', () => {
@@ -64,6 +70,39 @@ test('accepts allowlisted audio MIME types with codec parameters', () => {
 
 test('trims a valid consultant transcript', () => {
   assert.equal(validateConsultantTranscript('  Quero whey  '), 'Quero whey');
+});
+
+test('normalizes common audio spellings of 3 whey', () => {
+  assert.equal(
+    normalizeConsultantTranscript('E o 3way, como é que funciona?'),
+    'E o 3 whey, como é que funciona?',
+  );
+  assert.equal(normalizeConsultantTranscript('Quero o three way'), 'Quero o 3 whey');
+});
+
+test('builds a bounded transcription prompt with recent conversation context', () => {
+  const prompt = buildConsultantTranscriptionPrompt([
+    'Quero entender as diferenças entre os tipos de whey.',
+    'Mensagem antiga '.repeat(100),
+    'E o isolado?',
+  ]);
+  assert.match(prompt, /Vocabulário: whey protein, 3 whey/);
+  assert.match(prompt, /E o isolado\?/);
+  assert.ok(prompt.length < 850);
+});
+
+test('allows cards only for explicit shopping requests or valid screening answers', () => {
+  assert.equal(hasExplicitCommercialIntent('Quero whey sem lactose'), true);
+  assert.equal(hasExplicitCommercialIntent('Me mostre opções de whey'), true);
+  assert.equal(hasExplicitCommercialIntent('Quanto custa a creatina?'), true);
+  assert.equal(hasExplicitCommercialIntent('Quero saber quanto custa a creatina'), true);
+  assert.equal(hasExplicitCommercialIntent('Quero saber como funciona o 3 whey'), false);
+  assert.equal(hasExplicitCommercialIntent('Quero uma informação sobre whey'), false);
+  assert.equal(hasExplicitCommercialIntent('Qual é o valor nutricional desse whey?'), false);
+  assert.equal(hasExplicitCommercialIntent('Whey isolado não tem lactose?'), false);
+  assert.equal(allowsConsultantRecommendations('Não tenho doenças e não uso remédios', true, true), true);
+  assert.equal(allowsConsultantRecommendations('Como funciona a cafeína?', true, true), false);
+  assert.equal(allowsConsultantRecommendations('Não tenho doenças', true, false), false);
 });
 
 test('rejects empty and oversized consultant transcripts safely', () => {

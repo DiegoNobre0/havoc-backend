@@ -38,6 +38,8 @@ test('detects each official fact intent deterministically', () => {
   assert.deepEqual(detectFactIntents('Quero uma proteína'), []);
   assert.deepEqual(detectFactIntents('Não uso medicamentos.'), []);
   assert.deepEqual(detectFactIntents('Oi, queria saber como usa creatina'), ['usage']);
+  assert.deepEqual(detectFactIntents('Whey isolado não tem lactose?'), ['allergens']);
+  assert.deepEqual(detectFactIntents('Quero whey sem glúten'), ['allergens']);
   assert.equal(isGenericUsageQuestion('Oi, queria saber como usa creatina'), true);
   assert.equal(isGenericUsageQuestion('Como tomar BCAA?'), true);
   assert.equal(isGenericUsageQuestion('Como usar beta alanina?'), true);

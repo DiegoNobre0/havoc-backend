@@ -86,7 +86,8 @@ export class StorefrontConsultantController {
     let tempPath: string | undefined;
     try {
       tempPath = await saveConsultantAudio(request);
-      const transcript = await transcribeConsultantAudio(tempPath);
+      const transcriptionPrompt = await this.service.getTranscriptionPrompt(sessionId, token);
+      const transcript = await transcribeConsultantAudio(tempPath, transcriptionPrompt);
       const { itemType, itemId, itemSlug } = request.query;
       const item =
         itemType && itemId && itemSlug ? { type: itemType, id: itemId, slug: itemSlug } : undefined;

@@ -34,6 +34,21 @@ export function validateConsultantTranscript(value: string) {
   return transcript;
 }
 
+export function normalizeConsultantTranscript(value: string) {
+  return validateConsultantTranscript(value).replace(/\b(?:3\s*way|three\s+way)\b/gi, '3 whey');
+}
+
+export function buildConsultantTranscriptionPrompt(history: string[]) {
+  const recentContext = history
+    .slice(-6)
+    .map((message) => message.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join(' | ')
+    .slice(-700);
+  const vocabulary = 'Vocabulário: whey protein, 3 whey, creatina, pré-treino, hipercalórico.';
+  return recentContext ? `${vocabulary}\nConversa recente: ${recentContext}` : vocabulary;
+}
+
 function mapMultipartError(request: FastifyRequest, error: unknown): never {
   const errors = request.server.multipartErrors;
   if (error instanceof errors.RequestFileTooLargeError) {
@@ -105,7 +120,7 @@ export async function removeConsultantAudio(tempPath: string | undefined) {
   if (tempPath) await unlink(tempPath).catch(() => undefined);
 }
 
-export async function transcribeConsultantAudio(tempPath: string) {
+export async function transcribeConsultantAudio(tempPath: string, prompt?: string) {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
     throw new AppError('Transcrição de áudio indisponível no momento.', 503);
@@ -117,8 +132,9 @@ export async function transcribeConsultantAudio(tempPath: string) {
       file: createReadStream(tempPath),
       model: process.env.OPENAI_TRANSCRIPTION_MODEL?.trim() || 'whisper-1',
       language: 'pt',
+      ...(prompt ? { prompt } : {}),
     });
-    return validateConsultantTranscript(result.text);
+    return normalizeConsultantTranscript(result.text);
   } catch (error) {
     if (error instanceof AppError) throw error;
     throw new AppError('Não foi possível transcrever o áudio. Tente novamente.', 503);

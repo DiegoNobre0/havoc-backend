@@ -27,7 +27,7 @@ const intentPatterns: ReadonlyArray<readonly [FactIntent, RegExp]> = [
   ['ingredients', /\b(?:ingrediente|ingredientes|composicao)\b/],
   [
     'allergens',
-    /\b(?:allergen|allergens|alergeno|alergenos|alergia|alergias|alergico|alergica|contem gluten|contem lactose)\b/,
+    /\b(?:allergen|allergens|alergeno|alergenos|alergia|alergias|alergico|alergica|(?:contem|possui|tem|sem|nao tem) (?:gluten|lactose))\b/,
   ],
   [
     'warnings',
