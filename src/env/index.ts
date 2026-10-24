@@ -14,10 +14,6 @@ const envSchema = z
     MERCADO_PAGO_WEBHOOK_SECRET: z.string().min(16).optional(),
     META_ACCESS_TOKEN: z.string().min(20).optional(),
     META_PHONE_ID: z.string().trim().min(1).optional(),
-    META_PAYMENT_CONFIRMED_TEMPLATE: z.string().trim().min(1).optional(),
-    META_ORDER_PROCESSING_TEMPLATE: z.string().trim().min(1).optional(),
-    META_ORDER_SHIPPED_TEMPLATE: z.string().trim().min(1).optional(),
-    META_ORDER_READY_PICKUP_TEMPLATE: z.string().trim().min(1).optional(),
   })
   .superRefine((values, context) => {
     if (values.NODE_ENV !== 'production') return;
@@ -28,10 +24,6 @@ const envSchema = z
       'MERCADO_PAGO_WEBHOOK_SECRET',
       'META_ACCESS_TOKEN',
       'META_PHONE_ID',
-      'META_PAYMENT_CONFIRMED_TEMPLATE',
-      'META_ORDER_PROCESSING_TEMPLATE',
-      'META_ORDER_SHIPPED_TEMPLATE',
-      'META_ORDER_READY_PICKUP_TEMPLATE',
     ] as const) {
       if (!values[key]) {
         context.addIssue({

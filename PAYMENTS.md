@@ -23,7 +23,8 @@ Create and approve these Utility templates in WhatsApp Manager. All templates us
 - Name: `pedido_pronto_retirada`
 - Body: `Ola, {{1}}! O pedido #{{2}} esta pronto para retirada.`
 
-Set the exact approved names in the corresponding environment variables.
+The approved names must match these values exactly. They are defined in
+`src/integrations/whatsapp/whatsapp.templates.ts` and are not environment variables.
 
 ## Required production variables
 
@@ -33,7 +34,3 @@ Set the exact approved names in the corresponding environment variables.
 - `MERCADO_PAGO_WEBHOOK_SECRET`
 - `META_ACCESS_TOKEN`
 - `META_PHONE_ID`
-- `META_PAYMENT_CONFIRMED_TEMPLATE`
-- `META_ORDER_PROCESSING_TEMPLATE`
-- `META_ORDER_SHIPPED_TEMPLATE`
-- `META_ORDER_READY_PICKUP_TEMPLATE`

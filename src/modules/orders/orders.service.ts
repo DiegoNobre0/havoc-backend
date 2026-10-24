@@ -1,4 +1,5 @@
 import { prisma } from '../../database/prisma.js';
+import { WHATSAPP_TEMPLATES } from '../../integrations/whatsapp/whatsapp.templates.js';
 
 export class OrderService {
   // 1. Lista os pedidos com paginação e busca
@@ -104,14 +105,14 @@ export class OrderService {
         let templateName = '';
 
         if (status === 'CONFIRMED') {
-          templateName = process.env.META_PAYMENT_CONFIRMED_TEMPLATE?.trim() ?? '';
+          templateName = WHATSAPP_TEMPLATES.paymentConfirmed;
           if (isDelivery) {
             mensagemAutomativa = `✅ *PAGAMENTO CONFIRMADO!*\nUhull, ${primeiroNome}! Recebemos o seu pagamento do pedido *#${order.code}*. Ele já vai descer pra equipe separar e mandar pra você! 🚀`;
           } else {
             mensagemAutomativa = `✅ *PAGAMENTO CONFIRMADO!*\nMaravilha, ${primeiroNome}! O pagamento do seu pedido *#${order.code}* caiu certinho. Ele já vai descer pra equipe preparar sua retirada! 🚀`;
           }
         } else if (status === 'PROCESSING') {
-          templateName = process.env.META_ORDER_PROCESSING_TEMPLATE?.trim() ?? '';
+          templateName = WHATSAPP_TEMPLATES.orderProcessing;
           if (isDelivery) {
             mensagemAutomativa = `📦 Olá, ${primeiroNome}! O seu pedido *#${order.code}* acabou de ir para a fila de preparo. Logo mais ele sai para entrega! 🛵`;
           } else {
@@ -120,10 +121,10 @@ export class OrderService {
         } else if (status === 'SHIPPED') {
           // Pedido saiu para entrega ou está pronto para retirar
           if (isDelivery) {
-            templateName = process.env.META_ORDER_SHIPPED_TEMPLATE?.trim() ?? '';
+            templateName = WHATSAPP_TEMPLATES.orderShipped;
             mensagemAutomativa = `🛵 *SAIU PARA ENTREGA!*\nO motoboy já está a caminho com o seu pedido *#${order.code}*. Fique de olho aí! 👀`;
           } else {
-            templateName = process.env.META_ORDER_READY_PICKUP_TEMPLATE?.trim() ?? '';
+            templateName = WHATSAPP_TEMPLATES.orderReadyForPickup;
             mensagemAutomativa = `✅ *PRONTINHO!*\nO seu pedido *#${order.code}* já está pronto e aguardando você aqui na loja. Pode vir retirar! 🛍️`;
           }
         }

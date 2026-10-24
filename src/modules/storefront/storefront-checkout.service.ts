@@ -4,6 +4,8 @@ import { prisma } from '../../database/prisma.js';
 import { env } from '../../env/index.js';
 import { AppError } from '../../shared/errors/AppError.js';
 import { redis } from '../../shared/redis/redis.js';
+import { newOrderEvent, orderPrintEvent } from '../../shared/order-events.js';
+import { io } from '../../shared/socket/socket.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import type { CheckoutBody } from './storefront.schemas.js';
 
@@ -212,8 +214,21 @@ export class StorefrontCheckoutService {
     );
 
     await onOrderCreated?.(order.id);
+    this.publishOrderCreated(order, input.paymentMethod === 'CASH');
 
     return this.finishCheckout(order, input);
+  }
+
+  private publishOrderCreated(order: CheckoutOrder, printCashOrder: boolean) {
+    if (!io) return;
+
+    io.to('all_chats').emit('new_order', newOrderEvent(order));
+
+    if (!printCashOrder) return;
+    io.to('loja_fisica').emit(
+      'imprimir_cupom',
+      orderPrintEvent(order, { paid: false, method: 'DINHEIRO' }),
+    );
   }
 
   private async finishCheckout(order: CheckoutOrder, input: CheckoutBody) {

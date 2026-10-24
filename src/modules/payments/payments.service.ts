@@ -3,8 +3,10 @@ import { prisma } from '../../database/prisma.js';
 import { AppError } from '../../shared/errors/AppError.js';
 import axiosStatic from 'axios';
 import { io } from '../../shared/socket/socket.js';
+import { orderPrintEvent } from '../../shared/order-events.js';
 import crypto from 'crypto';
 import { WhatsAppIntegrationService } from '../../integrations/whatsapp/whatsappIntegration.service.js';
+import { WHATSAPP_TEMPLATES } from '../../integrations/whatsapp/whatsapp.templates.js';
 import { mapMercadoPagoStatus, mercadoPagoPaymentId } from './payments.utils.js';
 
 type MercadoPagoPayment = {
@@ -440,17 +442,13 @@ export class PaymentsService {
   ) {
     if (io) {
       io.to(`order_${order.id}`).emit('payment_confirmed', { orderId: order.id, status: 'PAID' });
-      io.to('loja_fisica').emit('imprimir_cupom', {
-        codigo: order.code,
-        cliente: order.customerName,
-        telefone: order.customerPhone,
-        endereco: order.deliveryAddress || '>>> RETIRADA BALCÃO <<<',
-        itens: order.items.map(
-          (item) => `${item.quantity}x ${item.product?.name || item.kit?.name}`,
-        ),
-        total: order.total,
-        data: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
-      });
+      io.to('loja_fisica').emit(
+        'imprimir_cupom',
+        orderPrintEvent(order, {
+          paid: true,
+          method: order.paymentMethod === 'PIX' ? 'PIX' : 'CARTÃO',
+        }),
+      );
     }
 
     const notification = await prisma.paymentNotification.upsert({
@@ -469,16 +467,11 @@ export class PaymentsService {
 
     const whatsapp = new WhatsAppIntegrationService();
     const firstName = order.customerName.split(' ')[0] || 'Cliente';
-    const templateName = process.env.META_PAYMENT_CONFIRMED_TEMPLATE?.trim();
-    const result = templateName
-      ? await whatsapp.sendTemplateMessage(order.customerPhone, templateName, [
-          firstName,
-          order.code,
-        ])
-      : await whatsapp.sendTextMessage(
-          order.customerPhone,
-          `Pagamento confirmado, ${firstName}! Recebemos o pagamento do pedido #${order.code}. Agora ele seguirá para preparação.`,
-        );
+    const result = await whatsapp.sendTemplateMessage(
+      order.customerPhone,
+      WHATSAPP_TEMPLATES.paymentConfirmed,
+      [firstName, order.code],
+    );
     await prisma.paymentNotification.update({
       where: { id: notification.id },
       data: result.sent
