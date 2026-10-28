@@ -5,6 +5,7 @@ import { env } from '../../env/index.js';
 import { AppError } from '../../shared/errors/AppError.js';
 import { redis } from '../../shared/redis/redis.js';
 import { newOrderEvent, orderPrintEvent } from '../../shared/order-events.js';
+import { decrementOrderStock } from '../payments/payments.inventory.js';
 import { io } from '../../shared/socket/socket.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import type { CheckoutBody } from './storefront.schemas.js';
@@ -173,8 +174,8 @@ export class StorefrontCheckoutService {
     const code = `HAV-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
     const initialStatus =
       input.paymentMethod === 'CASH' ? ('CONFIRMED' as const) : ('PENDING' as const);
-    const order = await prisma.$transaction((transaction) =>
-      transaction.order.create({
+    const order = await prisma.$transaction(async (transaction) => {
+      const createdOrder = await transaction.order.create({
         data: {
           code,
           status: initialStatus,
@@ -210,8 +211,17 @@ export class StorefrontCheckoutService {
           },
         },
         include: checkoutOrderInclude,
-      }),
-    );
+      });
+      if (input.paymentMethod === 'CASH') {
+        await decrementOrderStock(transaction, createdOrder.id);
+      }
+      return createdOrder;
+    });
+
+    if (input.paymentMethod === 'CASH') {
+      const cacheKeys = await redis.keys('catalog:products:*').catch(() => []);
+      if (cacheKeys.length > 0) await redis.del(cacheKeys).catch(() => undefined);
+    }
 
     await onOrderCreated?.(order.id);
     this.publishOrderCreated(order, input.paymentMethod === 'CASH');

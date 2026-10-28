@@ -8,6 +8,8 @@ import crypto from 'crypto';
 import { WhatsAppIntegrationService } from '../../integrations/whatsapp/whatsappIntegration.service.js';
 import { WHATSAPP_TEMPLATES } from '../../integrations/whatsapp/whatsapp.templates.js';
 import { mapMercadoPagoStatus, mercadoPagoPaymentId } from './payments.utils.js';
+import { applyPaidPaymentStock } from './payments.inventory.js';
+import { redis } from '../../shared/redis/redis.js';
 
 type MercadoPagoPayment = {
   id: string | number;
@@ -365,25 +367,28 @@ export class PaymentsService {
       throw new AppError('Pedido cancelado ou reembolsado não pode ser confirmado.', 409);
     }
 
-    const firstPaidConfirmation = mappedStatus === 'PAID' && payment.status !== 'PAID';
-    const updatedOrder = await prisma.$transaction(async (transaction) => {
-      await transaction.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: mappedStatus,
-          externalId: String(paymentData.id),
-          providerStatus: paymentData.status ?? null,
-          statusDetail: paymentData.status_detail ?? null,
-          webhookPayload: paymentData as Prisma.InputJsonValue,
-          lastSyncedAt: new Date(),
-          ...(mappedStatus === 'PAID' && {
-            paidAt: paymentData.date_approved ? new Date(paymentData.date_approved) : new Date(),
-          }),
-        },
-      });
+    const synchronization = await prisma.$transaction(async (transaction) => {
+      let confirmedNow = false;
+      const paymentUpdate = {
+        status: mappedStatus,
+        externalId: String(paymentData.id),
+        providerStatus: paymentData.status ?? null,
+        statusDetail: paymentData.status_detail ?? null,
+        webhookPayload: paymentData as Prisma.InputJsonValue,
+        lastSyncedAt: new Date(),
+        ...(mappedStatus === 'PAID' && {
+          paidAt: paymentData.date_approved ? new Date(paymentData.date_approved) : new Date(),
+        }),
+      };
+
+      if (mappedStatus === 'PAID') {
+        confirmedNow = await applyPaidPaymentStock(transaction, payment.id, orderId, paymentUpdate);
+      } else {
+        await transaction.payment.update({ where: { id: payment.id }, data: paymentUpdate });
+      }
 
       if (mappedStatus === 'REFUNDED' && payment.order.status !== 'REFUNDED') {
-        return transaction.order.update({
+        const order = await transaction.order.update({
           where: { id: orderId },
           data: {
             status: 'REFUNDED',
@@ -397,9 +402,10 @@ export class PaymentsService {
             },
           },
         });
+        return { order, confirmedNow };
       }
-      if (firstPaidConfirmation && payment.order.status === 'PENDING') {
-        return transaction.order.update({
+      if (confirmedNow && payment.order.status === 'PENDING') {
+        const order = await transaction.order.update({
           where: { id: orderId },
           data: {
             status: 'CONFIRMED',
@@ -413,8 +419,9 @@ export class PaymentsService {
             },
           },
         });
+        return { order, confirmedNow };
       }
-      return transaction.order.findUnique({
+      const order = await transaction.order.findUnique({
         where: { id: orderId },
         include: {
           items: {
@@ -422,10 +429,13 @@ export class PaymentsService {
           },
         },
       });
+      return { order, confirmedNow };
     });
 
-    if (firstPaidConfirmation && updatedOrder) {
-      await this.publishPaymentConfirmation(payment.id, updatedOrder);
+    if (synchronization.confirmedNow && synchronization.order) {
+      const cacheKeys = await redis.keys('catalog:products:*').catch(() => []);
+      if (cacheKeys.length > 0) await redis.del(cacheKeys).catch(() => undefined);
+      await this.publishPaymentConfirmation(payment.id, synchronization.order);
     }
     return { paymentId: payment.id, status: mappedStatus };
   }

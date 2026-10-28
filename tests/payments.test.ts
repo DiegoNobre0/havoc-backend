@@ -7,6 +7,11 @@ import {
 } from '../src/modules/payments/payments.utils.js';
 import { newOrderEvent, orderPrintEvent } from '../src/shared/order-events.js';
 import { WHATSAPP_TEMPLATES } from '../src/integrations/whatsapp/whatsapp.templates.js';
+import {
+  applyPaidPaymentStock,
+  decrementOrderStock,
+  orderStockRequirements,
+} from '../src/modules/payments/payments.inventory.js';
 
 test('maps every relevant Mercado Pago state to the local payment state', () => {
   assert.equal(mapMercadoPagoStatus('approved'), 'PAID');
@@ -80,4 +85,80 @@ test('keeps approved WhatsApp template names in code', () => {
     orderShipped: 'pedido_saiu_entrega',
     orderReadyForPickup: 'pedido_pronto_retirada',
   });
+});
+
+test('calculates stock for products and expands repeated kit components', () => {
+  const requirements = orderStockRequirements([
+    {
+      quantity: 2,
+      product: { id: 'creatine', name: 'Creatina' },
+      kit: null,
+    },
+    {
+      quantity: 3,
+      product: null,
+      kit: {
+        items: [
+          { quantity: 1, product: { id: 'creatine', name: 'Creatina' } },
+          { quantity: 2, product: { id: 'whey', name: 'Whey' } },
+        ],
+      },
+    },
+  ]);
+
+  assert.deepEqual(requirements, [
+    { productId: 'creatine', name: 'Creatina', quantity: 5 },
+    { productId: 'whey', name: 'Whey', quantity: 6 },
+  ]);
+});
+
+test('decrements stock only for the first paid confirmation', async () => {
+  let paid = false;
+  const decrements: number[] = [];
+  const transaction = {
+    payment: {
+      updateMany: async () => {
+        if (paid) return { count: 0 };
+        paid = true;
+        return { count: 1 };
+      },
+    },
+    orderItem: {
+      findMany: async () => [
+        { quantity: 2, product: { id: 'product-1', name: 'Creatina' }, kit: null },
+      ],
+    },
+    product: {
+      updateMany: async ({ data }: { data: { stock: { decrement: number } } }) => {
+        decrements.push(data.stock.decrement);
+        return { count: 1 };
+      },
+    },
+  };
+
+  assert.equal(
+    await applyPaidPaymentStock(transaction as never, 'payment-1', 'order-1', { status: 'PAID' }),
+    true,
+  );
+  assert.equal(
+    await applyPaidPaymentStock(transaction as never, 'payment-1', 'order-1', { status: 'PAID' }),
+    false,
+  );
+  assert.deepEqual(decrements, [2]);
+});
+
+test('rejects payment confirmation when stock is no longer sufficient', async () => {
+  const transaction = {
+    orderItem: {
+      findMany: async () => [
+        { quantity: 2, product: { id: 'product-1', name: 'Creatina' }, kit: null },
+      ],
+    },
+    product: { updateMany: async () => ({ count: 0 }) },
+  };
+
+  await assert.rejects(
+    decrementOrderStock(transaction as never, 'order-1'),
+    /Estoque insuficiente para Creatina/,
+  );
 });

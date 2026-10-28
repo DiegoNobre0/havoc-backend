@@ -60,12 +60,13 @@ export const updateProductSchema = createProductSchema.partial();
 // Mais tolerante que o createProductSchema: aqui a gente normaliza/coage
 // em vez de rejeitar de cara, porque o texto do PDF é ruidoso.
 export const pdfImportItemSchema = z.object({
-  name: z.string(),
-  description: z.string().optional(), // 👈 NOVO CAMPO AQUI
-  price: z.number(),
-  cost: z.number().optional(),
-  stock: z.number(),
-  categories: z.array(z.string()),
+  sku: z.string().trim().min(1),
+  name: z.string().trim().min(2),
+  description: z.string().trim().min(10).optional(),
+  price: z.number().positive(),
+  cost: z.number().nonnegative().optional(),
+  stock: z.number().int().nonnegative(),
+  categories: z.array(z.string().trim().min(2)).default([]),
 });
 
 export type PdfImportItem = z.infer<typeof pdfImportItemSchema>;
