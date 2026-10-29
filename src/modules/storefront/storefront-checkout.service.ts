@@ -331,8 +331,28 @@ export class StorefrontCheckoutService {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       select: {
+        id: true,
         code: true,
         status: true,
+        customerName: true,
+        deliveryMethod: true,
+        deliveryAddress: true,
+        paymentMethod: true,
+        subtotal: true,
+        shippingCost: true,
+        discount: true,
+        total: true,
+        items: {
+          select: {
+            id: true,
+            quantity: true,
+            unitPrice: true,
+            totalPrice: true,
+            productId: true,
+            product: { select: { name: true } },
+            kit: { select: { name: true } },
+          },
+        },
         payment: {
           select: {
             status: true,
@@ -353,6 +373,27 @@ export class StorefrontCheckoutService {
       statusDetail: order.payment?.statusDetail ?? null,
       paidAt: order.payment?.paidAt ?? null,
       expiresAt: order.payment?.expiresAt ?? null,
+      order: {
+        id: order.id,
+        code: order.code,
+        status: order.status,
+        customerName: order.customerName,
+        deliveryMethod: order.deliveryMethod,
+        deliveryAddress: order.deliveryAddress,
+        paymentMethod: order.paymentMethod,
+        subtotal: Number(order.subtotal),
+        shippingCost: Number(order.shippingCost),
+        discount: Number(order.discount),
+        total: Number(order.total),
+        items: order.items.map((item) => ({
+          id: item.id,
+          type: item.productId ? ('product' as const) : ('kit' as const),
+          name: item.product?.name ?? item.kit?.name ?? 'Item do pedido',
+          quantity: item.quantity,
+          unitPrice: Number(item.unitPrice),
+          totalPrice: Number(item.totalPrice),
+        })),
+      },
     };
   }
 

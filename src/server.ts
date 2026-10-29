@@ -3,6 +3,9 @@ import { env } from './env/index.js';
 import { logger } from './shared/logger.js';
 import '../src/integrations/IA/chatbot.worker.js';
 import './shared/worker/payment.queue.js';
+import { productLabelQueue } from './shared/worker/product-label.queue.js';
+import { productLabelRecoveryTask } from './shared/worker/product-label.recovery.js';
+import { productLabelWorker } from './shared/worker/product-label.worker.js';
 // Ativa o agendador de tarefas automático
 import './shared/worker/recovery.cron.js';
 import { setupSocket } from './shared/socket/socket.js';
@@ -30,9 +33,9 @@ signals.forEach((signal) => {
     logger.info(`\n${signal} recebido. Desligando graciosamente...`);
 
     try {
-      // Aqui futuramente adicionaremos:
-      // await prisma.$disconnect();
-      // await redis.quit();
+      productLabelRecoveryTask.stop();
+      await productLabelWorker.close();
+      await productLabelQueue.close();
       await app.close();
       logger.info('Servidor encerrado com sucesso.');
       process.exit(0);

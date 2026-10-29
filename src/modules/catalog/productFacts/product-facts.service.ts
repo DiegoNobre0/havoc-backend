@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import dns from 'node:dns/promises';
+import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
 import axios from 'axios';
 import OpenAI from 'openai';
@@ -17,6 +19,7 @@ import {
   validateLiteralExtraction,
   type SyncProductLabelInput,
 } from './product-facts.schemas.js';
+import { productIdentityHash } from './product-facts.identity.js';
 
 const MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 const MAX_SOURCE_TEXT = 100_000;
@@ -24,7 +27,7 @@ const ALLOWED_CONTENT_TYPES = ['text/html', 'text/plain', 'application/pdf'];
 
 export function isPrivateAddress(address: string) {
   if (net.isIPv4(address)) {
-    const [a, b] = address.split('.').map(Number);
+    const [a, b, c] = address.split('.').map(Number);
     return (
       a === 0 ||
       a === 10 ||
@@ -32,6 +35,11 @@ export function isPrivateAddress(address: string) {
       (a === 169 && b === 254) ||
       (a === 172 && b >= 16 && b <= 31) ||
       (a === 192 && b === 168) ||
+      (a === 192 && b === 0) ||
+      (a === 192 && b === 88 && c === 99) ||
+      (a === 198 && (b === 18 || b === 19)) ||
+      (a === 198 && b === 51 && c === 100) ||
+      (a === 203 && b === 0 && c === 113) ||
       (a === 100 && b >= 64 && b <= 127) ||
       a >= 224
     );
@@ -47,6 +55,7 @@ export function isPrivateAddress(address: string) {
       normalized.startsWith('fe9') ||
       normalized.startsWith('fea') ||
       normalized.startsWith('feb') ||
+      normalized.startsWith('2001:db8:') ||
       normalized.startsWith('ff') ||
       normalized.startsWith('::ffff:')
     );
@@ -67,7 +76,7 @@ async function assertPublicDestination(hostname: string) {
   if (net.isIP(hostname) || hostname.toLowerCase() === 'localhost') {
     throw new AppError('Destino de rede não permitido.', 400);
   }
-  let addresses: { address: string }[];
+  let addresses: { address: string; family: number }[];
   try {
     addresses = await dns.lookup(hostname, { all: true, verbatim: true });
   } catch {
@@ -76,6 +85,7 @@ async function assertPublicDestination(hostname: string) {
   if (addresses.length === 0 || addresses.some(({ address }) => isPrivateAddress(address))) {
     throw new AppError('O domínio do fabricante resolve para uma rede não permitida.', 400);
   }
+  return addresses[0]!;
 }
 
 function htmlToText(html: string) {
@@ -112,17 +122,33 @@ function decodeSourceBuffer(buffer: Buffer, contentTypeHeader: string) {
 export async function fetchOfficialSource(initialUrl: string, domain: string) {
   let url = validateManufacturerSourceUrl(initialUrl, domain);
   for (let redirects = 0; redirects <= 3; redirects++) {
-    await assertPublicDestination(url.hostname);
-    const response = await axios.get<ArrayBuffer>(url.toString(), {
-      responseType: 'arraybuffer',
-      timeout: 10_000,
-      maxContentLength: MAX_SOURCE_BYTES,
-      maxBodyLength: MAX_SOURCE_BYTES,
-      maxRedirects: 0,
-      validateStatus: (status) =>
-        (status >= 200 && status < 300) || (status >= 300 && status < 400),
-      headers: { 'User-Agent': 'HavocProductLabelSync/1.0' },
-    });
+    const destination = await assertPublicDestination(url.hostname);
+    const lookup = (
+      _hostname: string,
+      _options: unknown,
+      callback: (error: NodeJS.ErrnoException | null, address: string, family: number) => void,
+    ) => callback(null, destination.address, destination.family);
+    const httpAgent = new http.Agent({ lookup });
+    const httpsAgent = new https.Agent({ lookup });
+    let response;
+    try {
+      response = await axios.get<ArrayBuffer>(url.toString(), {
+        responseType: 'arraybuffer',
+        timeout: 10_000,
+        maxContentLength: MAX_SOURCE_BYTES,
+        maxBodyLength: MAX_SOURCE_BYTES,
+        maxRedirects: 0,
+        proxy: false,
+        httpAgent,
+        httpsAgent,
+        validateStatus: (status) =>
+          (status >= 200 && status < 300) || (status >= 300 && status < 400),
+        headers: { 'User-Agent': 'HavocProductLabelSync/1.0' },
+      });
+    } finally {
+      httpAgent.destroy();
+      httpsAgent.destroy();
+    }
 
     if (response.status >= 300) {
       const location = response.headers.location;
@@ -352,17 +378,10 @@ export async function discoverOfficialIdentity(productName: string) {
   ) {
     return verifiedFallback();
   }
-  const officialResults = results.filter((result) => {
-    const hostname = new URL(result.link).hostname.toLowerCase();
-    return hostname === domain || hostname.endsWith(`.${domain}`);
-  });
-  const sourceResult = officialResults.sort(
-    (left, right) => resultScore(right) - resultScore(left),
-  )[0];
   return {
     manufacturer: selected.manufacturer,
     domain,
-    sourceUrl: sourceResult?.link ?? matchedResult.link,
+    sourceUrl: matchedResult.link,
   };
 }
 
@@ -408,7 +427,14 @@ async function extractFacts(productName: string, sourceUrl: string, sourceText: 
   });
   const parsed = completion.choices[0]?.message.parsed;
   if (!parsed) throw new Error('A extração estruturada retornou vazia.');
-  return validateLiteralExtraction(parsed, sourceText);
+  try {
+    return validateLiteralExtraction(parsed, sourceText);
+  } catch (error) {
+    throw new AppError(
+      error instanceof Error ? error.message : 'A fonte não comprovou o produto exato.',
+      422,
+    );
+  }
 }
 
 export class ProductFactsService {
@@ -421,52 +447,223 @@ export class ProductFactsService {
     return product.labelFacts;
   }
 
-  async sync(productId: string, input: SyncProductLabelInput) {
+  async sync(
+    productId: string,
+    input: SyncProductLabelInput = {},
+    expectedIdentityHash?: string,
+    expectedLabelVersion?: number,
+  ) {
+    const { redis } = await import('../../../shared/redis/redis.js');
+    const lockKey = `product-label:sync:${productId}`;
+    const lockToken = crypto.randomUUID();
+    const acquired = await redis.set(lockKey, lockToken, 'PX', 120_000, 'NX');
+    if (!acquired) throw new AppError('A sincronização deste produto já está em andamento.', 423);
+
+    let lockOwned = true;
+    const renewLock = setInterval(() => {
+      void redis
+        .eval(
+          "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end",
+          1,
+          lockKey,
+          lockToken,
+          120_000,
+        )
+        .then((result) => {
+          if (Number(result) !== 1) lockOwned = false;
+        })
+        .catch(() => {
+          lockOwned = false;
+        });
+    }, 40_000);
+    renewLock.unref();
+
+    try {
+      return await this.syncUnlocked(
+        productId,
+        input,
+        expectedIdentityHash,
+        expectedLabelVersion,
+        () => {
+          if (!lockOwned) throw new AppError('O lock da sincronização foi perdido.', 423);
+        },
+      );
+    } finally {
+      clearInterval(renewLock);
+      await redis
+        .eval(
+          "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+          1,
+          lockKey,
+          lockToken,
+        )
+        .catch(() => undefined);
+    }
+  }
+
+  private async syncUnlocked(
+    productId: string,
+    input: SyncProductLabelInput,
+    expectedIdentityHash?: string,
+    expectedLabelVersion?: number,
+    assertLockOwned: () => void = () => undefined,
+  ) {
     const product = await prisma.product.findFirst({
       where: { id: productId, deletedAt: null },
       include: { labelFacts: true },
     });
     if (!product) throw new AppError('Produto não encontrado.', 404);
 
-    const domainValue = input.manufacturerDomain ?? product.labelFacts?.manufacturerDomain;
-    if (!domainValue) throw new AppError('manufacturerDomain é obrigatório para sincronizar.', 400);
-    const domain = manufacturerDomainSchema.parse(domainValue);
-    if (input.sourceUrl) validateManufacturerSourceUrl(input.sourceUrl, domain);
+    const identityHash = productIdentityHash(product.name);
+    const labelVersion = product.labelFacts?.version ?? 1;
+    const hadPublishableLabel = Boolean(
+      product.labelFacts?.status === 'SOURCE_MATCHED' &&
+      product.labelFacts.exactProductMatch &&
+      product.labelFacts.manufacturerDomain &&
+      product.labelFacts.sourceUrl &&
+      product.labelFacts.sourceRetrievedAt,
+    );
+    if (expectedIdentityHash && expectedIdentityHash !== identityHash) {
+      throw new AppError('A identidade do produto mudou; sincronização descartada.', 409);
+    }
+    if (expectedLabelVersion && product.labelFacts?.version !== expectedLabelVersion) {
+      throw new AppError('Existe uma versão mais nova do produto; job descartado.', 409);
+    }
 
-    const mark = async (status: 'NOT_FOUND' | 'FAILED') =>
-      prisma.productLabel.upsert({
-        where: { productId },
-        create: { productId, manufacturerDomain: domain, status },
-        update: {
-          manufacturerDomain: domain,
-          status,
-          exactProductMatch: false,
-          version: { increment: 1 },
+    let domain: string | null = input.manufacturerDomain
+      ? manufacturerDomainSchema.parse(input.manufacturerDomain)
+      : (product.labelFacts?.manufacturerDomain ?? null);
+    let sourceUrl = input.sourceUrl;
+    let manufacturer = product.labelFacts?.manufacturer ?? null;
+
+    if (sourceUrl && !domain) {
+      throw new AppError('Uma URL administrativa exige o domínio correspondente.', 400);
+    }
+    if (sourceUrl && domain) validateManufacturerSourceUrl(sourceUrl, domain);
+
+    const clearFacts = {
+      sourceUrl: null,
+      sourceTitle: null,
+      sourceRetrievedAt: null,
+      sourceHash: null,
+      evidence: Prisma.JsonNull,
+      servingSize: null,
+      servingsPerContainer: null,
+      usageInstructions: null,
+      ingredients: null,
+      allergenStatement: null,
+      warnings: Prisma.JsonNull,
+      nutritionFacts: Prisma.JsonNull,
+    };
+    const mark = async (status: 'NOT_FOUND' | 'FAILED', errorCode: string) => {
+      assertLockOwned();
+      const nextSyncAt = new Date(
+        Date.now() + (status === 'NOT_FOUND' ? 7 * 24 * 60 * 60_000 : 60 * 60_000),
+      );
+      const result = await prisma.productLabel.updateMany({
+        where: { productId, version: labelVersion },
+        data: hadPublishableLabel
+          ? {
+              identityHash,
+              nextSyncAt,
+              lastSyncErrorCode: errorCode,
+            }
+          : {
+              manufacturer,
+              manufacturerDomain: domain,
+              identityHash,
+              status,
+              exactProductMatch: false,
+              nextSyncAt,
+              lastSyncErrorCode: errorCode,
+              ...clearFacts,
+            },
+      });
+      if (result.count === 0) {
+        throw new AppError('O produto mudou durante a sincronização; resultado descartado.', 409);
+      }
+      return prisma.productLabel.findUniqueOrThrow({ where: { productId } });
+    };
+
+    if (product.labelFacts) {
+      const processing = await prisma.productLabel.updateMany({
+        where: { productId, version: labelVersion },
+        data: {
+          identityHash,
+          ...(!hadPublishableLabel && { status: 'PROCESSING', exactProductMatch: false }),
+          lastSyncAttemptAt: new Date(),
+          nextSyncAt: null,
+          lastSyncErrorCode: null,
+          syncAttemptCount: { increment: 1 },
         },
       });
+      if (processing.count === 0) {
+        throw new AppError('O produto mudou antes do início da sincronização.', 409);
+      }
+    } else {
+      await prisma.productLabel.create({
+        data: {
+          productId,
+          manufacturer,
+          manufacturerDomain: domain,
+          identityHash,
+          status: 'PROCESSING',
+          lastSyncAttemptAt: new Date(),
+          syncAttemptCount: 1,
+        },
+      });
+    }
+
+    const assertCurrentIdentity = async () => {
+      assertLockOwned();
+      const current = await prisma.product.findFirst({
+        where: { id: productId, deletedAt: null },
+        select: { name: true, labelFacts: { select: { version: true } } },
+      });
+      if (
+        !current ||
+        productIdentityHash(current.name) !== identityHash ||
+        current.labelFacts?.version !== labelVersion
+      ) {
+        throw new AppError('A identidade do produto mudou; sincronização descartada.', 409);
+      }
+    };
 
     try {
-      const urls = input.sourceUrl
-        ? [input.sourceUrl]
-        : await discoverOfficialUrls(product.name, domain);
+      if (!domain) {
+        const identity = await discoverOfficialIdentity(product.name);
+        if (!identity) {
+          throw new AppError(
+            'Não foi possível confirmar uma fonte oficial para o produto exato.',
+            404,
+          );
+        }
+        domain = identity.domain;
+        manufacturer = identity.manufacturer;
+        sourceUrl = identity.sourceUrl;
+      }
+
+      const urls = sourceUrl ? [sourceUrl] : await discoverOfficialUrls(product.name, domain);
       if (urls.length === 0) {
-        await mark('NOT_FOUND');
         throw new AppError('Nenhuma fonte oficial encontrada para o produto exato.', 404);
       }
 
+      let operationalError: unknown;
       for (const candidate of urls) {
         try {
           const source = await fetchOfficialSource(candidate, domain);
           const facts = await extractFacts(product.name, source.url, source.text);
-          return await prisma.productLabel.upsert({
-            where: { productId },
-            create: {
-              productId,
+          await assertCurrentIdentity();
+          const updated = await prisma.productLabel.updateMany({
+            where: { productId, version: labelVersion },
+            data: {
+              manufacturer,
               manufacturerDomain: domain,
               sourceUrl: source.url,
               sourceTitle: facts.sourceTitle,
               sourceRetrievedAt: new Date(),
               sourceHash: crypto.createHash('sha256').update(source.buffer).digest('hex'),
+              evidence: facts as unknown as Prisma.InputJsonValue,
               servingSize: facts.servingSize?.value ?? null,
               servingsPerContainer: facts.servingsPerContainer?.value ?? null,
               usageInstructions: facts.usageInstructions?.value ?? null,
@@ -476,38 +673,36 @@ export class ProductFactsService {
               nutritionFacts: facts.nutritionFacts?.value ?? Prisma.JsonNull,
               exactProductMatch: true,
               status: 'SOURCE_MATCHED',
-            },
-            update: {
-              manufacturerDomain: domain,
-              sourceUrl: source.url,
-              sourceTitle: facts.sourceTitle,
-              sourceRetrievedAt: new Date(),
-              sourceHash: crypto.createHash('sha256').update(source.buffer).digest('hex'),
-              servingSize: facts.servingSize?.value ?? null,
-              servingsPerContainer: facts.servingsPerContainer?.value ?? null,
-              usageInstructions: facts.usageInstructions?.value ?? null,
-              ingredients: facts.ingredients?.value ?? null,
-              allergenStatement: facts.allergenStatement?.value ?? null,
-              warnings: facts.warnings?.value ?? Prisma.JsonNull,
-              nutritionFacts: facts.nutritionFacts?.value ?? Prisma.JsonNull,
-              exactProductMatch: true,
-              status: 'SOURCE_MATCHED',
+              identityHash,
+              nextSyncAt: new Date(Date.now() + 30 * 24 * 60 * 60_000),
+              lastSyncErrorCode: null,
               version: { increment: 1 },
             },
           });
+          if (updated.count === 0) {
+            throw new AppError(
+              'O produto mudou durante a sincronização; resultado descartado.',
+              409,
+            );
+          }
+          return await prisma.productLabel.findUniqueOrThrow({ where: { productId } });
         } catch (error) {
-          if (error instanceof AppError && error.statusCode === 503) throw error;
+          if (error instanceof AppError) {
+            if (error.statusCode === 409 || error.statusCode === 503) throw error;
+            if ([400, 404, 422].includes(error.statusCode)) continue;
+          }
+          operationalError = error;
         }
       }
-      await mark('NOT_FOUND');
+      if (operationalError) throw operationalError;
       throw new AppError(
         'As fontes oficiais não comprovaram correspondência exata do produto.',
         422,
       );
     } catch (error) {
-      if (!(error instanceof AppError) || (error.statusCode !== 404 && error.statusCode !== 422)) {
-        await mark('FAILED');
-      }
+      if (error instanceof AppError && error.statusCode === 409) throw error;
+      const notFound = error instanceof AppError && [404, 422].includes(error.statusCode);
+      await mark(notFound ? 'NOT_FOUND' : 'FAILED', notFound ? 'NO_EXACT_SOURCE' : 'SYNC_FAILED');
       if (error instanceof AppError) throw error;
       throw new AppError('Falha segura ao sincronizar fatos do fabricante.', 502);
     }
@@ -522,26 +717,26 @@ export class ProductFactsService {
     if (
       product.labelFacts?.status === 'SOURCE_MATCHED' &&
       product.labelFacts.exactProductMatch &&
-      product.labelFacts.sourceUrl
+      product.labelFacts.manufacturerDomain &&
+      product.labelFacts.sourceUrl &&
+      product.labelFacts.sourceRetrievedAt &&
+      product.labelFacts.identityHash === productIdentityHash(product.name) &&
+      product.labelFacts.nextSyncAt &&
+      product.labelFacts.nextSyncAt > new Date()
     ) {
       return product.labelFacts;
     }
-
-    if (product.labelFacts?.manufacturerDomain) {
-      return this.sync(productId, {});
+    if (product.labelFacts?.status === 'PENDING' || product.labelFacts?.status === 'PROCESSING') {
+      throw new AppError('A busca automática deste produto está em andamento.', 409);
     }
-
-    const identity = await discoverOfficialIdentity(product.name);
-    if (!identity) {
-      throw new AppError('Não foi possível confirmar uma fonte oficial para o produto exato.', 404);
+    if (product.labelFacts?.nextSyncAt && product.labelFacts.nextSyncAt > new Date()) {
+      if (product.labelFacts.status === 'NOT_FOUND') {
+        throw new AppError('Ainda não há uma fonte exata confirmada para este produto.', 404);
+      }
+      if (product.labelFacts.status === 'FAILED') {
+        throw new AppError('A consulta das fontes está temporariamente indisponível.', 503);
+      }
     }
-    const label = await this.sync(productId, {
-      manufacturerDomain: identity.domain,
-      sourceUrl: identity.sourceUrl,
-    });
-    return prisma.productLabel.update({
-      where: { productId },
-      data: { manufacturer: identity.manufacturer },
-    });
+    return this.sync(productId, {});
   }
 }

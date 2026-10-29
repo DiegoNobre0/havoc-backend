@@ -12,6 +12,7 @@ import {
   isPrivateAddress,
   validateManufacturerSourceUrl,
 } from '../src/modules/catalog/productFacts/product-facts.service.js';
+import { productIdentityHash } from '../src/modules/catalog/productFacts/product-facts.identity.js';
 
 test('accepts manufacturer domains and official subdomains only', () => {
   assert.equal(manufacturerDomainSchema.parse('  fabricante.com.br '), 'fabricante.com.br');
@@ -42,8 +43,16 @@ test('recognizes private and non-routable network addresses', () => {
   assert.equal(isPrivateAddress('127.0.0.1'), true);
   assert.equal(isPrivateAddress('10.2.3.4'), true);
   assert.equal(isPrivateAddress('192.168.1.1'), true);
+  assert.equal(isPrivateAddress('192.0.2.1'), true);
+  assert.equal(isPrivateAddress('198.51.100.1'), true);
+  assert.equal(isPrivateAddress('203.0.113.1'), true);
   assert.equal(isPrivateAddress('::1'), true);
   assert.equal(isPrivateAddress('8.8.8.8'), false);
+});
+
+test('product identity hashes ignore cosmetic name differences but preserve variants', () => {
+  assert.equal(productIdentityHash('Creatína  300g'), productIdentityHash('creatina-300g'));
+  assert.notEqual(productIdentityHash('Creatina 300g'), productIdentityHash('Creatina 500g'));
 });
 
 test('nutrition rows preserve ordered Brazilian label text and numeric units', () => {

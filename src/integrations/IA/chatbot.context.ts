@@ -20,10 +20,9 @@ import {
 } from '../../modules/storefrontConsultant/storefrontConsultant.facts.js';
 import { ProductFactsService } from '../../modules/catalog/productFacts/product-facts.service.js';
 import {
-  researchExactProductUsage,
+  answerProductFactsWithResearch,
   researchExactProductProfile,
   researchGeneralQuestion,
-  wantsResearchSources,
 } from '../../modules/storefrontConsultant/storefrontConsultant.research.js';
 
 function catalogUrl(pathname: string): string | null {
@@ -422,16 +421,15 @@ export class ChatbotContext {
         const synced = await this.productFactsService.syncForConsultant(product.id);
         product = { ...product, labelFacts: publishableLabelFacts(synced) };
       } catch (error) {
-        const secondaryUsage = await researchExactProductUsage(product.name, {
-          includeSources: wantsResearchSources(consulta),
-        });
-        if (secondaryUsage) return secondaryUsage;
-        return error instanceof AppError && error.statusCode === 422
-          ? `Encontrei a página oficial de ${product.name}, mas ela não publica um modo de uso que eu possa confirmar. Confira a orientação da embalagem; se quiser, posso explicar o uso geral desse tipo de suplemento.`
-          : `Não encontrei o rótulo oficial exato de ${product.name}. Por segurança, não vou estimar a dose. Posso explicar o uso geral desse tipo de suplemento, mas siga a orientação da embalagem.`;
+        const expectedMiss = error instanceof AppError && [404, 422].includes(error.statusCode);
+        if (!expectedMiss) {
+          return error instanceof AppError && error.statusCode === 409
+            ? `A busca automática de ${product.name} já está em andamento. Tente novamente em instantes.`
+            : `Não consegui consultar as fontes de ${product.name} agora. Tente novamente em alguns instantes.`;
+        }
       }
     }
-    return formatOfficialFactsResponse(product, detectFactIntents(consulta));
+    return answerProductFactsWithResearch(product, detectFactIntents(consulta));
   }
 
   async pesquisarFontesConfiaveis(pergunta: string): Promise<string> {

@@ -34,7 +34,11 @@ export function orderStockRequirements(items: StockOrderItem[]) {
   return [...required.values()];
 }
 
-export async function decrementOrderStock(transaction: Prisma.TransactionClient, orderId: string) {
+export async function decrementOrderStock(
+  transaction: Prisma.TransactionClient,
+  orderId: string,
+  options: { allowNegative?: boolean } = {},
+) {
   const items = await transaction.orderItem.findMany({
     where: { orderId },
     select: {
@@ -54,6 +58,13 @@ export async function decrementOrderStock(transaction: Prisma.TransactionClient,
   });
 
   for (const requirement of orderStockRequirements(items)) {
+    if (options.allowNegative) {
+      await transaction.product.update({
+        where: { id: requirement.productId },
+        data: { stock: { decrement: requirement.quantity } },
+      });
+      continue;
+    }
     const updated = await transaction.product.updateMany({
       where: { id: requirement.productId, stock: { gte: requirement.quantity } },
       data: { stock: { decrement: requirement.quantity } },
@@ -76,6 +87,6 @@ export async function applyPaidPaymentStock(
   });
   if (claimed.count !== 1) return false;
 
-  await decrementOrderStock(transaction, orderId);
+  await decrementOrderStock(transaction, orderId, { allowNegative: true });
   return true;
 }

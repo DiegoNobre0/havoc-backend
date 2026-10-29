@@ -96,6 +96,8 @@ enum ShippingType {
 }
 
 enum ProductLabelStatus {
+  PENDING
+  PROCESSING
   SOURCE_MATCHED
   NOT_FOUND
   FAILED
@@ -188,6 +190,7 @@ model ProductLabel {
   sourceTitle          String?
   sourceRetrievedAt    DateTime?
   sourceHash           String?
+  evidence             Json?
   servingSize          String?
   servingsPerContainer String?
   usageInstructions    String?            @db.Text
@@ -198,6 +201,11 @@ model ProductLabel {
   exactProductMatch    Boolean            @default(false)
   status               ProductLabelStatus @default(NOT_FOUND)
   version              Int                @default(1)
+  identityHash         String?
+  syncAttemptCount     Int                @default(0)
+  lastSyncAttemptAt    DateTime?
+  nextSyncAt           DateTime?
+  lastSyncErrorCode    String?
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
@@ -205,6 +213,7 @@ model ProductLabel {
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([status, exactProductMatch])
+  @@index([nextSyncAt])
   @@map("product_labels")
 }
 

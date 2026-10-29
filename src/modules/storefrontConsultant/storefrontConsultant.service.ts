@@ -26,12 +26,11 @@ import {
   resolveSingleProductCandidate,
 } from './storefrontConsultant.facts.js';
 import {
-  researchExactProductUsage,
+  answerProductFactsWithResearch,
   researchExactProductProfile,
   researchGeneralQuestion,
   type ResearchedProductProfile,
   shouldResearchGeneralQuestion,
-  wantsResearchSources,
 } from './storefrontConsultant.research.js';
 import type { ConsultantContext, CreateConsultantMessage } from './storefrontConsultant.schemas.js';
 import { buildConsultantTranscriptionPrompt } from './storefrontConsultant.audio.js';
@@ -210,26 +209,21 @@ export class StorefrontConsultantService {
               const synced = await this.productFactsService.syncForConsultant(product.id);
               product = { ...product, labelFacts: publishableLabelFacts(synced) };
             } catch (error) {
-              const secondaryUsage =
-                resolvedFactIntents.length === 1 && resolvedFactIntents[0] === 'usage'
-                  ? await researchExactProductUsage(product.name, {
-                      includeSources: wantsResearchSources(userMessage.content),
-                    })
-                  : null;
-              const officialSourceWithoutFacts =
-                error instanceof AppError && error.statusCode === 422;
-              syncFailure = {
-                content:
-                  secondaryUsage ??
-                  (officialSourceWithoutFacts
-                    ? `Encontrei a página oficial de ${product.name}, mas ela não publica um modo de uso que eu possa confirmar. Confira a orientação da embalagem; se quiser, posso explicar o uso geral desse tipo de suplemento.`
-                    : `Não encontrei o rótulo oficial exato de ${product.name}. Por segurança, não vou estimar a dose. Posso explicar o uso geral desse tipo de suplemento, mas siga a orientação da embalagem.`),
-                recommendations: [product],
-              };
+              const expectedMiss =
+                error instanceof AppError && [404, 422].includes(error.statusCode);
+              if (!expectedMiss) {
+                syncFailure = {
+                  content:
+                    error instanceof AppError && error.statusCode === 409
+                      ? `A busca automática de ${product.name} já está em andamento. Tente novamente em instantes.`
+                      : `Não consegui consultar as fontes de ${product.name} agora. Tente novamente em alguns instantes.`,
+                  recommendations: [product],
+                };
+              }
             }
           }
           answer = syncFailure ?? {
-            content: formatOfficialFactsResponse(product, resolvedFactIntents),
+            content: await answerProductFactsWithResearch(product, resolvedFactIntents),
             recommendations: [product],
           };
         } else {

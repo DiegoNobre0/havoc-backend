@@ -22,7 +22,7 @@ const intentPatterns: ReadonlyArray<readonly [FactIntent, RegExp]> = [
   ],
   [
     'nutrition',
-    /\b(?:tabela nutricional|informacao nutricional|informacoes nutricionais|nutrition facts|nutrition table|nutrient|nutrients|nutriente|nutrientes|valor nutricional)\b/,
+    /\b(?:tabela nutricional|informacao nutricional|informacoes nutricionais|nutrition facts|nutrition table|nutrient|nutrients|nutriente|nutrientes|valor nutricional|calorias|carboidratos?|gorduras?|fibras?|sodio|(?:quanto|quantas?|gramas?) (?:de )?proteina)\b/,
   ],
   ['ingredients', /\b(?:ingrediente|ingredientes|composicao)\b/],
   [
@@ -195,7 +195,9 @@ export function formatOfficialFactsResponse(
     lines.push(`Modo de uso: ${facts.usageInstructions ?? 'não registrado na fonte.'}`);
   }
   if (includeAll || intents.has('nutrition')) {
-    lines.push('Informação nutricional:');
+    lines.push(
+      `Informação nutricional${facts.servingSize ? ` por porção (${facts.servingSize})` : ''}:`,
+    );
     if (facts.nutritionFacts?.length) {
       for (const row of facts.nutritionFacts) {
         lines.push(
@@ -218,9 +220,7 @@ export function formatOfficialFactsResponse(
       `Advertências: ${facts.warnings?.length ? facts.warnings.join(' | ') : 'não registradas na fonte.'}`,
     );
   }
-  if (includeAll || intents.has('source')) {
-    lines.push(`Fonte: ${facts.source.title ?? 'título não informado'}`);
-    lines.push(`URL: ${facts.source.url}`);
-  }
+  lines.push(`Fonte oficial: ${facts.source.title ?? 'título não informado'}`);
+  lines.push(`URL oficial: ${facts.source.url}`);
   return lines.join('\n');
 }

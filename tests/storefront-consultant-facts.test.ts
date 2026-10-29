@@ -94,7 +94,8 @@ test('formats only requested literal facts without converting values', () => {
   assert.match(response, /Creatina: 5000 mg \| %VD: não informado/);
   assert.match(response, /Sódio: 0 mg \| %VD: 0%/);
   assert.doesNotMatch(response, /PODE CONTER LEITE/);
-  assert.doesNotMatch(response, /https:\/\/marca\.example\/creatina-exata/);
+  assert.match(response, /Fonte oficial: Creatina Exata - rótulo/);
+  assert.match(response, /https:\/\/marca\.example\/creatina-exata/);
   assert.doesNotMatch(response, /\b3\s*g\b/i);
 
   const source = formatOfficialFactsResponse(candidate, ['source']);

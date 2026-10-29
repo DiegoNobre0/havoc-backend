@@ -6,6 +6,8 @@ import { PDFParse } from 'pdf-parse';
 import { pdfImportItemSchema } from '../catalog.schemas.js';
 import { parseClippInventoryText } from './product-import.parser.js';
 import { enrichImportedProducts } from './product-import.enrichment.js';
+import { productIdentityHash } from '../productFacts/product-facts.identity.js';
+import { enqueueProductLabelSync } from '../../../shared/worker/product-label.queue.js';
 
 function normalizedCatalogName(value: string) {
   return value
@@ -26,6 +28,16 @@ export class ProductService {
   private async clearCache() {
     const keys = await redis.keys(`${this.CACHE_PREFIX}*`);
     if (keys.length > 0) await redis.del(keys);
+  }
+
+  private async enqueueLabelSync(productId: string, productName: string, labelVersion = 1) {
+    try {
+      await enqueueProductLabelSync(productId, productIdentityHash(productName), labelVersion);
+      return true;
+    } catch (error) {
+      console.error(`Erro ao enfileirar dados oficiais de ${productName}:`, error);
+      return false;
+    }
   }
 
   async findMany(
@@ -102,6 +114,7 @@ export class ProductService {
       rest.slug = `${rest.slug}-${hash}`;
     }
 
+    const identityHash = productIdentityHash(rest.name);
     const product = await prisma.product.create({
       data: {
         ...rest,
@@ -109,15 +122,22 @@ export class ProductService {
         categories: catsToConnect
           ? { connect: catsToConnect.map((id: string) => ({ id })) }
           : undefined,
-        ...((manufacturer !== undefined ||
-          manufacturerDomain !== undefined ||
-          labelFacts !== undefined) && {
-          labelFacts: { create: { manufacturer, manufacturerDomain, ...labelFacts } },
-        }),
+        labelFacts: {
+          create: {
+            ...labelFacts,
+            manufacturer,
+            manufacturerDomain,
+            status: 'PENDING',
+            exactProductMatch: false,
+            identityHash,
+          },
+        },
       },
+      include: { labelFacts: true },
     });
 
     await this.clearCache();
+    await this.enqueueLabelSync(product.id, product.name, product.labelFacts?.version);
     return product;
   }
 
@@ -132,17 +152,18 @@ export class ProductService {
       ...rest
     } = data;
     const catsToConnect = category_ids || categoryIds;
-    const storedLabel =
-      manufacturer !== undefined || manufacturerDomain !== undefined
-        ? await prisma.productLabel.findUnique({
-            where: { productId: id },
-            select: { manufacturer: true, manufacturerDomain: true },
-          })
-        : null;
+    const storedProduct = await prisma.product.findUnique({
+      where: { id },
+      select: { name: true, labelFacts: true },
+    });
+    const storedLabel = storedProduct?.labelFacts;
+    const nextName = typeof rest.name === 'string' ? rest.name : (storedProduct?.name ?? '');
     const sourceIdentityChanged =
+      (typeof rest.name === 'string' && rest.name !== storedProduct?.name) ||
       (manufacturer !== undefined && manufacturer !== storedLabel?.manufacturer) ||
       (manufacturerDomain !== undefined && manufacturerDomain !== storedLabel?.manufacturerDomain);
-    const invalidateFacts = sourceIdentityChanged || labelFacts !== undefined;
+    const invalidateFacts = sourceIdentityChanged || labelFacts !== undefined || !storedLabel;
+    const identityHash = productIdentityHash(nextName);
 
     const product = await prisma.product.update({
       where: { id },
@@ -155,19 +176,30 @@ export class ProductService {
         categories: catsToConnect
           ? { set: catsToConnect.map((catId: string) => ({ id: catId })) }
           : undefined,
-        ...((manufacturer !== undefined ||
+        ...((invalidateFacts ||
+          manufacturer !== undefined ||
           manufacturerDomain !== undefined ||
           labelFacts !== undefined) && {
           labelFacts: {
             upsert: {
-              create: { manufacturer, manufacturerDomain, ...labelFacts },
+              create: {
+                ...labelFacts,
+                manufacturer,
+                manufacturerDomain,
+                status: 'PENDING',
+                exactProductMatch: false,
+                identityHash,
+              },
               update: {
                 ...(manufacturer !== undefined && { manufacturer }),
                 ...(manufacturerDomain !== undefined && { manufacturerDomain }),
                 ...labelFacts,
                 ...(invalidateFacts && {
-                  status: 'NOT_FOUND',
+                  status: 'PENDING',
                   exactProductMatch: false,
+                  identityHash,
+                  nextSyncAt: null,
+                  lastSyncErrorCode: null,
                   version: { increment: 1 },
                 }),
               },
@@ -175,9 +207,13 @@ export class ProductService {
           },
         }),
       },
+      include: { labelFacts: true },
     });
 
     await this.clearCache();
+    if (invalidateFacts || storedLabel?.status === 'PENDING') {
+      await this.enqueueLabelSync(product.id, product.name, product.labelFacts?.version);
+    }
     return product;
   }
   async findOne(id: string) {
@@ -190,9 +226,22 @@ export class ProductService {
     const product = await prisma.product.update({
       where: { id },
       data: { isActive },
-      select: { id: true, isActive: true },
+      select: { id: true, name: true, isActive: true, labelFacts: true },
     });
     await this.clearCache();
+    if (isActive && !product.labelFacts) {
+      const identityHash = productIdentityHash(product.name);
+      const label = await prisma.productLabel.create({
+        data: { productId: product.id, status: 'PENDING', identityHash },
+      });
+      await this.enqueueLabelSync(product.id, product.name, label.version);
+    } else if (
+      isActive &&
+      (product.labelFacts?.status === 'PENDING' ||
+        (product.labelFacts?.nextSyncAt && product.labelFacts.nextSyncAt <= new Date()))
+    ) {
+      await this.enqueueLabelSync(product.id, product.name, product.labelFacts.version);
+    }
     return product;
   }
 
@@ -235,6 +284,7 @@ export class ProductService {
       criados: 0,
       atualizados: 0,
       semClassificacao: 0,
+      enriquecimentosEnfileirados: 0,
       erros: parsedPdf.errors.length,
       detalhesErros: parsedPdf.errors.map((error) => ({
         item: { sku: error.sku, registro: error.record },
@@ -303,7 +353,10 @@ export class ProductService {
           categoryConnectIds.push({ id: category.id });
         }
 
-        const existingBySku = await prisma.product.findUnique({ where: { sku: item.sku } });
+        const existingBySku = await prisma.product.findUnique({
+          where: { sku: item.sku },
+          include: { labelFacts: true },
+        });
         const existingProduct =
           existingBySku ??
           (await prisma.product.findFirst({
@@ -311,10 +364,13 @@ export class ProductService {
               deletedAt: null,
               OR: [{ slug }, { name: { equals: item.name, mode: 'insensitive' } }],
             },
+            include: { labelFacts: true },
           }));
 
         const isProductActive = item.stock > 0;
         if (existingProduct) {
+          const needsLabelSync =
+            !existingProduct.labelFacts || existingProduct.labelFacts.status === 'PENDING';
           await prisma.product.update({
             where: { id: existingProduct.id },
             data: {
@@ -326,9 +382,27 @@ export class ProductService {
               ...(item.description !== undefined && { description: item.description }),
               ...(item.cost !== undefined && { cost_price: item.cost }),
               ...(categoryConnectIds.length > 0 && { categories: { set: categoryConnectIds } }),
+              ...(!existingProduct.labelFacts && {
+                labelFacts: {
+                  create: {
+                    status: 'PENDING',
+                    identityHash: productIdentityHash(existingProduct.name),
+                  },
+                },
+              }),
               updatedAt: new Date(),
             },
           });
+          if (
+            needsLabelSync &&
+            (await this.enqueueLabelSync(
+              existingProduct.id,
+              existingProduct.name,
+              existingProduct.labelFacts?.version ?? 1,
+            ))
+          ) {
+            relatorio.enriquecimentosEnfileirados++;
+          }
           relatorio.atualizados++;
         } else {
           const newProduct = await prisma.product.create({
@@ -341,10 +415,20 @@ export class ProductService {
               ...(item.cost !== undefined && { cost_price: item.cost }),
               stock: item.stock,
               isActive: isProductActive,
+              labelFacts: {
+                create: {
+                  status: 'PENDING',
+                  identityHash: productIdentityHash(item.name),
+                },
+              },
               ...(categoryConnectIds.length > 0 && { categories: { connect: categoryConnectIds } }),
             },
           });
           relatorio.criados++;
+
+          if (await this.enqueueLabelSync(newProduct.id, newProduct.name, 1)) {
+            relatorio.enriquecimentosEnfileirados++;
+          }
 
           if (isProductActive) {
             await imageScraperQueue

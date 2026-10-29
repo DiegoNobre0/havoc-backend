@@ -129,9 +129,9 @@ test('decrements stock only for the first paid confirmation', async () => {
       ],
     },
     product: {
-      updateMany: async ({ data }: { data: { stock: { decrement: number } } }) => {
+      update: async ({ data }: { data: { stock: { decrement: number } } }) => {
         decrements.push(data.stock.decrement);
-        return { count: 1 };
+        return {};
       },
     },
   };
@@ -147,7 +147,27 @@ test('decrements stock only for the first paid confirmation', async () => {
   assert.deepEqual(decrements, [2]);
 });
 
-test('rejects payment confirmation when stock is no longer sufficient', async () => {
+test('records the sale atomically even when concurrent orders consumed the remaining stock', async () => {
+  const decrements: number[] = [];
+  const transaction = {
+    orderItem: {
+      findMany: async () => [
+        { quantity: 2, product: { id: 'product-1', name: 'Creatina' }, kit: null },
+      ],
+    },
+    product: {
+      update: async ({ data }: { data: { stock: { decrement: number } } }) => {
+        decrements.push(data.stock.decrement);
+        return {};
+      },
+    },
+  };
+
+  await decrementOrderStock(transaction as never, 'order-1', { allowNegative: true });
+  assert.deepEqual(decrements, [2]);
+});
+
+test('keeps unpaid cash checkout from creating negative inventory', async () => {
   const transaction = {
     orderItem: {
       findMany: async () => [
